@@ -16,9 +16,9 @@
 extern "C" {
 #endif
 
-#define OS_GAME_COUNT 2
+#include "car_games.h"   /* OS_GAME_COUNT + registry (3 with MATRIX) */
 #define OS_HIST_N     480          /* analytics ring buffers (PSRAM) */
-#define SET_ITEM_COUNT 19         /* settings items incl. SAVE (guide 5.6/11) */
+#define SET_ITEM_COUNT 18         /* settings items incl. SAVE (guide 5.6/11) */
 
 /* drive alerts (guide 5.2) - enum order = priority (lower value wins) */
 typedef enum {
@@ -36,7 +36,6 @@ typedef enum {
     OS_DRIVE_ANALYTICS,
     OS_DIAG,
     OS_SETTINGS,
-    OS_OLED_CTRL,
     OS_GAMES_HUB,
     OS_GAME_1,
     OS_GAME_2,
@@ -75,7 +74,6 @@ typedef struct {
     uint8_t mist_max;       /* setting 4: mist max run x10s, 0 = unlimited */
     uint8_t tft_bright;     /* setting 5: TFT backlight % */
     uint8_t gear_caps[5];   /* gear 1..5 caps */
-    uint8_t oled_layout;    /* 0..3 */
     uint8_t hud_layout;     /* 0=full 1=compact 2=night (guide 11 Display) */
     uint8_t rumble_mode;    /* 0 OFF 1 SOFT 2 FULL (arcade NVS) */
     uint8_t rgb_bright;     /* matrix brightness 10..72 */
@@ -87,10 +85,9 @@ typedef struct {
 typedef struct {
     os_state_t state;
     os_state_t prev_state;
-    uint8_t  home_sel;          /* HOME focus 0..8 (persistent per screen) */
+    uint8_t  home_sel;          /* HOME focus (persistent per screen) */
     uint8_t  home_page;         /* PART 10: HOME pages 0..1 */
-    uint8_t  oled_sel;          /* OLED control focus 0..2    (persistent per screen) */
-    uint8_t  game_sel;          /* GAMES HUB focus 0..4       (persistent per screen) */
+    uint8_t  game_sel;          /* GAMES HUB focus 0..OS_GAME_COUNT-1 */
     uint8_t  settings_sel;      /* SETTINGS focus 0..10       (persistent per screen) */
     bool     settings_jump;     /* PART 10: jump-list overlay open */
     uint8_t  jump_sel;          /* PART 10: jump-list focus */
@@ -100,10 +97,7 @@ typedef struct {
     uint8_t  engine_vol;
     uint8_t  led_bright;
     uint8_t  obs_cm;
-    uint8_t  oled_layout;       /* 0=mini HUD 1=radar 2=STATUS 3=text */
-    char     oled_text[32];
     uint32_t next_tft_ms;           /* next TFT frame deadline (guide 6.2) */
-    uint32_t next_oled_ms;          /* next OLED frame deadline */
     uint32_t state_enter_ms;
 
     /* settings draft/save/cancel model (guide 5.6) */
@@ -220,7 +214,6 @@ void      os_request_screen(os_ctx_t *ctx, int st, uint32_t now);
 os_ctx_t *car_os_ctx(void);
 
 void os_draw_tft(os_ctx_t *ctx, uint32_t now);
-void os_draw_oled(os_ctx_t *ctx, uint32_t now);
 void os_game_frame(os_ctx_t *ctx, const xbox360_pad_t *pad, uint32_t now);
 
 bool os_input_captured(void);   /* true: OS owns buttons (menus/games)  */

@@ -6,6 +6,7 @@
 #include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -27,6 +28,24 @@ static char s_pass[65] = NET_WIFI_DEFAULT_PASS;
 static volatile net_wifi_state_t s_state = NET_WIFI_DOWN;
 static volatile bool s_time_ok = false;
 static bool s_started = false;
+static time_t s_last_known = 0;      /* NVS last epoch: instant boot clock */
+static uint32_t s_sync_ms = 0;       /* SNTP lock timestamp (for wifi-off) */
+static uint32_t s_start_ms = 0;      /* start timestamp (90 s give-up) */
+static uint32_t s_last_save_ms = 0;  /* 60 s epoch save cadence */
+static bool s_wifi_off = false;
+
+static uint32_t wifi_now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+/* persist epoch (NVS "net"/"last_t") */
+static void save_epoch(time_t t)
+{
+    nvs_handle_t h;
+    if (nvs_open("net", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u64(h, "last_t", (uint64_t)t);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
 
 /* Load SSID/Pass from NVS if present (fallback = defaults above). */
 static void load_creds(void)
@@ -92,7 +111,13 @@ static void time_sync_cb(struct timeval *tv)
 {
     (void)tv;
     s_time_ok = true;
-    ESP_LOGI(TAG, "SNTP synced, epoch=%lld", (long long)time(NULL));
+    time_t t = time(NULL);
+    ESP_LOGI(TAG, "SNTP synced, epoch=%lld", (long long)t);
+    /* instant next boot + 60 s cadence anchor */
+    s_last_known = t;
+    save_epoch(t);
+    if (!s_sync_ms) s_sync_ms = wifi_now_ms();
+    s_last_save_ms = wifi_now_ms();
 }
 
 static void start_sntp(void)
@@ -128,15 +153,16 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
 esp_err_t net_wifi_start(void)
 {
     if (s_started) return ESP_OK;
-    load_creds();
 
-    /* NVS must be up before esp_wifi_init. Idempotent. */
+    /* NVS FIRST (Oct 2026 bugfix): load_creds() needs NVS up, otherwise
+       stored SSID/password silently fall back to defaults. */
     esp_err_t er = nvs_flash_init();
     if (er == ESP_ERR_NVS_NO_FREE_PAGES || er == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         nvs_flash_erase();
         er = nvs_flash_init();
     }
     if (er != ESP_OK) return er;
+    load_creds();
 
     s_evt = xEventGroupCreate();
     if (!s_evt) return ESP_ERR_NO_MEM;
@@ -168,9 +194,71 @@ esp_err_t net_wifi_start(void)
     esp_wifi_start();
     start_sntp();
     s_started = true;
+    s_start_ms = wifi_now_ms();
+    /* last known epoch for the instant boot clock */
+    {
+        nvs_handle_t h;
+        if (nvs_open("net", NVS_READONLY, &h) == ESP_OK) {
+            uint64_t lt = 0;
+            if (nvs_get_u64(h, "last_t", &lt) == ESP_OK && lt > 1700000000ULL)
+                s_last_known = (time_t)lt;
+            nvs_close(h);
+        }
+        if (s_last_known)
+            ESP_LOGI(TAG, "last known epoch=%lld (instant clock)",
+                     (long long)s_last_known);
+    }
     return ESP_OK;
 }
 
 net_wifi_state_t net_wifi_get_state(void) { return s_state; }
 bool net_wifi_up(void)                    { return s_state == NET_WIFI_UP; }
 bool net_wifi_time_synced(void)           { return s_time_ok; }
+time_t net_wifi_last_known(void)          { return s_last_known; }
+
+void net_wifi_poll(uint32_t now_ms)
+{
+    if (!s_started || s_wifi_off) return;
+    /* one-time: persist working creds to NVS (car_task context) */
+    static bool s_cred_done = false;
+    if (!s_cred_done && s_state == NET_WIFI_UP) {
+        s_cred_done = true;
+        nvs_handle_t h;
+        esp_err_t oe = nvs_open("net", NVS_READWRITE, &h);
+        if (oe != ESP_OK) {
+            ESP_LOGW(TAG, "cred save: nvs_open=%d", (int)oe);
+        } else {
+            char cur[33] = {0};
+            size_t l = sizeof(cur);
+            bool need = (nvs_get_str(h, "wifi_ssid", cur, &l) != ESP_OK) ||
+                        strcmp(cur, s_ssid) != 0;
+            if (need) {
+                nvs_set_str(h, "wifi_ssid", s_ssid);
+                nvs_set_str(h, "wifi_pass", s_pass);
+                esp_err_t ce = nvs_commit(h);
+                ESP_LOGI(TAG, "WiFi creds saved to NVS (commit=%d)", (int)ce);
+            } else {
+                ESP_LOGI(TAG, "WiFi creds already in NVS");
+            }
+            nvs_close(h);
+        }
+    }
+    /* 60 s epoch save cadence (crash-safe last-known) */
+    if (s_time_ok && now_ms - s_last_save_ms >= 60000) {
+        s_last_save_ms = now_ms;
+        time_t t = time(NULL);
+        if (t > 1700000000L) {
+            s_last_known = t;
+            save_epoch(t);
+        }
+    }
+    /* WiFi auto-off: 5 s after sync, or 90 s give-up (power save) */
+    bool synced = s_time_ok && s_sync_ms && now_ms - s_sync_ms >= 5000;
+    bool giveup = !s_time_ok && s_start_ms && now_ms - s_start_ms >= 90000;
+    if (synced || giveup) {
+        s_wifi_off = true;
+        esp_wifi_stop();
+        s_state = NET_WIFI_OFF;
+        ESP_LOGI(TAG, "WiFi OFF (%s)", synced ? "time synced" : "sync timeout");
+    }
+}

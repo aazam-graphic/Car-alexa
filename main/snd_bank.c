@@ -165,16 +165,13 @@ void snd_bank_preload_all(void)
         "gear_shift_up", "gear_shift_down", "gear_limit",
         "sys_boot_chime", "sys_ready", "sys_warning", "sys_estop",
         "sys_connect", "sys_disconnect",
-        "voice_listen_start", "voice_listen_end", "alexa_notify", "clap_detected",
+        "voice_listen_start", "voice_listen_end", "clap_detected",
         "roof_police_on", "roof_mode_cycle", "light_flash",
         "score_tick", "highscore_fanfare", "game_over", "score_reveal",
         "grade_A", "grade_B", "grade_C",
         "impact_light", "impact_moderate", "impact_hard",
         "freefall_start", "landing_smooth", "landing_hard",
         "stuck_alert", "drift_warn",
-        "profile_chime_safe", "profile_chime_night", "profile_chime_perf",
-        "profile_chime_park", "profile_chime_demo", "profile_chime_silent",
-        "profile_chime_game",
     };
     for (unsigned i = 0; i < sizeof(all) / sizeof(all[0]); i++) {
         s_tick++;

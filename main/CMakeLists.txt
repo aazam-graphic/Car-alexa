@@ -1,5 +1,5 @@
 idf_component_register(SRCS "main.c" "xbox360.c" "car.c" "tft_display.c" "tft_boot_anim.c"
-                            "car_os.c" "os_gfx.c" "os_assets.c" "os_screens_tft.c" "os_oled.c" "car_games.c" "os_widgets.c" "input_events.c" "roof_light.c" "cargame_neon_convoy.c" "cargame_neon_serpent.c" "ns_theme.c"
+                            "car_os.c" "os_gfx.c" "os_assets.c" "os_screens_tft.c" "car_games.c" "os_widgets.c" "input_events.c" "roof_light.c" "cargame_neon_convoy.c" "cargame_neon_serpent.c" "ns_theme.c"
                              "imu_driver.c" "imu_adv.c" "ui_motion_radar.c" "ui_drive_cockpit.c" "led_matrix.c" "game_serpent.c" "falak_show.c"
                              "snd_bank.c" "mic_in.c" "img_bank.c" "notif.c" "mem_diag.c"
                              "net_wifi.c"

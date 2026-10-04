@@ -61,6 +61,13 @@ void matrix_set_brightness(uint8_t b)
     s_bright = b;
 }
 uint8_t matrix_get_brightness(void) { return s_bright; }
+void matrix_set_brightness_pct(uint8_t pct)
+{
+    if (pct < 1) pct = 1;
+    if (pct > 100) pct = 100;
+    uint8_t a = (uint8_t)((uint16_t)pct * MATRIX_MAX_BRIGHTNESS / 100u);
+    matrix_set_brightness(a < 1 ? 1 : a);
+}
 
 void matrix_set_orient(uint8_t o)
 {
@@ -157,6 +164,12 @@ void matrix_set_dim_pct(uint8_t pct)
 {
     s_dim_pct = pct > 100 ? 100 : pct;
 }
+/* short goodbye flash after arcade exit (visible even if idle == OFF) */
+static uint32_t s_exit_until = 0;
+void led_matrix_exit_flash(void)
+{
+    s_exit_until = (uint32_t)(esp_timer_get_time() / 1000) + 600;
+}
 
 void led_matrix_safe_off(void)
 {
@@ -203,19 +216,6 @@ void matrix_test_diagonal(void)
     /* diagonal (0,0)->(9,9) mapper verify */
     for (int i = 0; i < 10; i++)
         matrix_set_xy_rgb(i, i, COL_CYAN);
-    matrix_show();
-}
-
-void matrix_test_pixel_walk(uint32_t now_ms)
-{
-    /* har 120ms ek pixel aage: numerical order me light karo */
-    matrix_clear();
-    int idx = (int)((now_ms / 120) % LED_MATRIX_COUNT);
-    int y = idx / LED_MATRIX_W;
-    int x;
-    if ((y & 1) == 0) x = idx % LED_MATRIX_W;
-    else x = (LED_MATRIX_W - 1) - (idx % LED_MATRIX_W);
-    matrix_set_xy_rgb(x, y, COL_HEAD);
     matrix_show();
 }
 
@@ -276,29 +276,37 @@ void led_matrix_tick(uint32_t now_ms)
     s_last_show = now_ms;
 
     uint32_t el = now_ms - s_boot_t0;
-    if (el < 1500) {
-        /* 0-1.5s: Phase-A 5-LED RGB test */
+    if (el < 1000) {
+        /* 0-1s: Phase-A 5-LED RGB test */
         if (s_boot_step != 1) { s_boot_step = 1; matrix_test_rgb5(); }
         return;
     }
-    if (el < 3000) {
-        /* 1.5-3s: border (zig-zag check) */
+    if (el < 2000) {
+        /* 1-2s: border (zig-zag check) */
         if (s_boot_step != 2) { s_boot_step = 2; matrix_test_border(); }
         return;
     }
-    if (el < 4500) {
-        /* 3-4.5s: diagonal mapper check */
+    if (el < 3000) {
+        /* 2-3s: diagonal mapper check, then idle */
         if (s_boot_step != 3) { s_boot_step = 3; matrix_test_diagonal(); }
-        return;
-    }
-    if (el < 12000) {
-        /* 4.5-12s: pixel walk (0,0)->(11,9) order verify */
-        matrix_test_pixel_walk(now_ms);
         return;
     }
     /* uske baad: idle show setting (FALAK / SWEEP / OFF) */
     s_boot_step = 4;
     if (s_owner != OWNER_FALAK) return;   /* arcade owns the matrix now */
+    {
+        uint32_t tnow = (uint32_t)(esp_timer_get_time() / 1000);
+        if ((int32_t)(s_exit_until - tnow) > 0) {
+            /* exit flash: 3 gold blinks so OFF-idle exits are visible */
+            matrix_clear();
+            if (((tnow / 200) & 1) == 0) {
+                for (int x = 0; x < s_fw; x += 2)
+                    matrix_set_xy_rgb(x, s_fh / 2, COL_GOLD);
+            }
+            matrix_show();
+            return;
+        }
+    }
     if (s_idle == MATRIX_IDLE_SWEEP) {
         /* classic gold sweep (test loop), follows field size */
         matrix_clear();

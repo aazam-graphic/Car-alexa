@@ -9,7 +9,7 @@
  *    gripper/spoiler servos REMOVED (hardware removed)
  *  - Lights: headlight relay (46), backlight relay (14), rear light relay (3),
  *    roof WS2812 police light (18, roof_light.c), WS2812 rear+under strip (6),
- *    front WS2812 LEDs (17/15) — modes: off/static/rainbow/chase/siren,
+ *    front WS2812 LEDs (17/15) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â modes: off/static/rainbow/chase/siren,
  *    indicators, hazard
  *  - 3x HC-SR04 ultrasonic (left/front/right): parking beeps, obstacle
  *    speed limit, emergency stop, auto mode avoidance + stuck escape
@@ -56,16 +56,19 @@
 #include "tft_boot_anim.h"
 #include "os_gfx.h"   /* early boot splash via framebuffer */
 #include "os_screens_tft.h"   /* PART 16: L5 safety overlay over games */
-#include "oled_driver.h"
 #include "imu_driver.h"
 #include "imu_adv.h"
 #include "snd_bank.h"
 #include "mic_in.h"
+#include "net_wifi.h"   /* SNTP poll + WiFi auto-off */
 #include "img_bank.h"   /* PART 6: late-init image preload */
 #include "notif.h"      /* PART 10.3 Notification Center feed */
 #include "mem_diag.h"   /* PART 15/16 memory diagnostics */
 
 static const char *TAG = "car";
+
+/* MPU hardware removed Oct 2026: set 1 to re-enable. Code stays compiled. */
+#define MPU_HW_PRESENT 0
 
 /* ---------------------------------- pins --------------------------------- */
 
@@ -74,13 +77,13 @@ static const char *TAG = "car";
 /* gripper + spoiler servos REMOVED (hardware removed, pins freed):
    GPIO 6 = rear WS2812 strip, GPIO 7 = front US trig.
    servo_deg() ignores ch2/ch3 so old calls become safe no-ops. */
-/* PIN_M_IN1..ENB removed — motors now via UART D1 slave (pin 36)
+/* PIN_M_IN1..ENB removed ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â motors now via UART D1 slave (pin 36)
    Pins 15,17 reused for front WS2812 LEDs */
 #define PIN_HEADLIGHT      46  /* was 48 - relay active LOW - headlight (46 free after TFT SCLK -> 21) */
 #define PIN_BACKLIGHT_UNUSED 14  /* PART 8: body-backlight relay REMOVED in hardware;
                                     GPIO14 repurposed as MIC WS (I2S1). Do not drive. */
 /* NOTE: PIN_BATT_ADC was removed long ago (GPIO1 = motor UART TX now). */
-#define PIN_US_TRIG_L      12  /* LEFT trig (moved 8→12) */
+#define PIN_US_TRIG_L      12  /* LEFT trig (moved 8ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢12) */
 #define PIN_US_TRIG_R      8   /* RIGHT trig (keep on 8) */
 #define PIN_US_TRIG_F      7   /* FRONT trig (was 38 - 38 now TFT MOSI) */
 // REAR US removed - pins 44/40 + 14 freed (user request)
@@ -89,7 +92,7 @@ static const char *TAG = "car";
 #define PIN_US_ECHO_R      11
 #define PIN_LED_STRIP      6   /* rear indicator (was 21 - 21 now TFT SCLK) */
 /* Under-car strip: DAISY-CHAINED after rear strip on GPIO 6 (rear DOUT -> under DIN).
-   No dedicated GPIO — board pe free pin nahi bacha (22-25 module pe exist nahi,
+   No dedicated GPIO ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â board pe free pin nahi bacha (22-25 module pe exist nahi,
    26-37 flash/PSRAM, 43/44 console). UNDER_STRIP_NUM = 12 under LEDs. */
 #define PIN_I2S_BCLK       39  /* revert original */
 #define PIN_I2S_LRC        47
@@ -98,23 +101,21 @@ static const char *TAG = "car";
 #define PIN_MIST           16  /* was 2 - 2 now TFT RST */
 // #define PIN_BATT_ADC removed - GPIO1 is motor UART TX (battery function removed)
 #define PIN_UART_TX        1   /* D1 motor slave -> D1 RX @115200 (was GPIO 14; 14 = backlight relay) */
-#define PIN_OLED_SDA       42
+#define PIN_OLED_SDA       42   /* I2C bus (OLED+MPU removed Oct 2026) */
 // #define PIN_BUZZER removed - amp (MAX98357 I2S) does horn via wav (GPIO 18 = roof WS2812)
 #define PIN_FRONT_LED_L    17  /* Front Left WS2812 RGB LED */
 #define PIN_FRONT_LED_R    15  /* Front Right WS2812 RGB LED */
 #define PIN_OLED_SCL       41
 
-#define OLED_ADDR          0x3C
+// OLED_ADDR removed - OLED hardware removed
 // MPU_ADDR removed - gyro disabled
-#define OLED_W             128
-#define OLED_H             64
 
 #define LED_STRIP_NUM      2   /* rear strip: 2 addressable pixels, HW strip triples each pixel to 3 physical LEDs = 6 total (3 left + 3 right) */
 #define UNDER_STRIP_NUM    12  /* under-car strip: 12 addressable LEDs (4 groups x 3) */
 // BATT_DIV removed - battery function removed
 
 #define LOOP_MS            40
-#define STICK_MAX          16000 /* typical stick ~±16000, not 32767 */
+#define STICK_MAX          16000 /* typical stick ~ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±16000, not 32767 */
 
 /* buttons B_* and modes MODE_* / AST_* now live in car_global.h (shared with Car OS) */
 
@@ -153,7 +154,7 @@ static uint16_t min3(uint16_t a, uint16_t b, uint16_t c)
 /* ---------------------------------------------------------------------------
  * PIN UNIQUENESS GUARD (added 2026-09-17 review)
  * Boot pe ek baar check karta hai ki koi GPIO do functions me nahi diya gaya.
- * Naya pin add karte waqt ye list update karo — duplicate hone par boot log
+ * Naya pin add karte waqt ye list update karo ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â duplicate hone par boot log
  * me clear ESP_LOGE milega (silent pin conflict se bachne ke liye).
  * NOTE: ESP32-S3 strapping pins jo is project me use ho rahe hain:
  *   GPIO0  (TFT DC)          - boot mode strap
@@ -208,9 +209,8 @@ static uint8_t  s_set_led_bright  = 100;  /* static LED brightness % */
 static uint8_t  s_set_tft_bright  = 100;  /* TFT backlight brightness % (guide 10/11) */
 static uint8_t  s_set_mist_max    = 6;    /* mist max run time x10s, 0 = unlimited (guide 11) */
 /* matrix + display settings (Oct 2026): RGB strip, orientation, idle show, fx */
-static uint8_t  s_set_rgb_bright  = 50;   /* 120-LED matrix brightness 10..72 */
-static uint8_t  s_set_tft_flip    = 0;    /* 0 normal 1 = TFT 180 flip */
-static uint8_t  s_set_mx_ori      = 0;    /* 0 normal 1 180 2 mirror-H 3 mirror-V */
+static uint8_t  s_set_rgb_bright  = 70;   /* 120-LED matrix brightness 1..100% */
+static uint8_t  s_set_mx_ori      = 0;    /* 0 LANDSCAPE 1 PORTRAIT */
 static uint8_t  s_set_mx_idle     = 0;    /* 0 FALAK 1 SWEEP 2 OFF */
 static uint8_t  s_set_mx_fx       = 1;    /* 0 minimal 1 full game effects */
 
@@ -231,9 +231,9 @@ static void roof_sync_to_storage(void)
     s_roof_col = rl->color_idx;
 }
 
-/* settings schema version — bump when defaults change so stale NVS values
+/* settings schema version ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â bump when defaults change so stale NVS values
    get replaced instead of persisted. v4: PART 7 roof modes + POLICE default. */
-#define SETTINGS_VER  5
+#define SETTINGS_VER  6
 
 static void settings_nvs_load(void)
 {
@@ -255,19 +255,30 @@ static void settings_nvs_load(void)
     if (nvs_get_u32(h, "roof_m", &v) == ESP_OK && v < ROOF_LIGHT_COUNT) s_roof_mode = (uint8_t)v;
     if (nvs_get_u32(h, "roof_b", &v) == ESP_OK && v <= 100) s_roof_bright = (uint8_t)v;
     if (nvs_get_u32(h, "roof_c", &v) == ESP_OK && v < ROOF_COLOR_COUNT) s_roof_col = (uint8_t)v;
-    if (nvs_get_u32(h, "mx_rgb", &v) == ESP_OK && v >= 10 && v <= 72) s_set_rgb_bright = (uint8_t)v;
+    if (nvs_get_u32(h, "mx_rgb", &v) == ESP_OK && v >= 1 && v <= 100) {
+        uint32_t ver0 = 0;
+        nvs_get_u32(h, "ver", &ver0);
+        if (ver0 < 6) {
+            /* v5 absolute (10..72) -> percent, same visual brightness */
+            uint8_t a = (uint8_t)(v > 72 ? 72 : v);
+            s_set_rgb_bright = (uint8_t)(a * 100u / MATRIX_MAX_BRIGHTNESS);
+            if (s_set_rgb_bright < 1) s_set_rgb_bright = 1;
+        } else {
+            s_set_rgb_bright = (uint8_t)v;
+        }
+    }
     if (nvs_get_u32(h, "mx_ori", &v) == ESP_OK && v <= 1) s_set_mx_ori = (uint8_t)v;
     if (nvs_get_u32(h, "mx_idle", &v) == ESP_OK && v <= 2) s_set_mx_idle = (uint8_t)v;
     if (nvs_get_u32(h, "mx_fx", &v) == ESP_OK && v <= 1) s_set_mx_fx = (uint8_t)v;
-    if (nvs_get_u32(h, "tft_flip", &v) == ESP_OK && v <= 1) s_set_tft_flip = (uint8_t)v;
 
     uint32_t ver = 0;
     bool gears_valid = false;
     if (nvs_get_u32(h, "ver", &ver) != ESP_OK || ver != SETTINGS_VER) {
-        ESP_LOGI(TAG, "settings schema v%u != NVS v%u — applying new defaults", SETTINGS_VER, ver);
-        s_roof_mode = ROOF_LIGHT_POLICE;   /* v4 migration: PART 7 default */
-        s_roof_col = 0;
-    } else if (nvs_get_u32(h, "gears", &v) == ESP_OK) {
+        /* v6+: never wipe user data on schema bump (only log + migrate above) */
+        ESP_LOGI(TAG, "settings schema v%u != NVS v%u ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â keeping saved values",
+                 SETTINGS_VER, ver);
+    }
+    if (nvs_get_u32(h, "gears", &v) == ESP_OK) {
         uint8_t tmp[CAR_GEAR_COUNT];
         bool ascending = true;
         for (int i = 0; i < CAR_GEAR_COUNT; i++) {
@@ -310,7 +321,6 @@ static void settings_nvs_save(void)
     nvs_set_u32(h, "mx_ori", s_set_mx_ori);
     nvs_set_u32(h, "mx_idle", s_set_mx_idle);
     nvs_set_u32(h, "mx_fx", s_set_mx_fx);
-    nvs_set_u32(h, "tft_flip", s_set_tft_flip);
     nvs_set_u32(h, "ver", SETTINGS_VER);          /* schema version for migration */
     uint32_t gp = 0;
     for (int i = 0; i < CAR_GEAR_COUNT; i++) gp |= ((uint32_t)s_gear_caps[i] & 0xFF) << (8 * i);
@@ -324,27 +334,21 @@ static void settings_nvs_save(void)
 void car_display_apply_saved(void)
 {
     tft_set_flip(false);   /* TFT always normal (user asked: no TFT change) */
-    matrix_set_brightness(s_set_rgb_bright);
+    matrix_set_brightness_pct(s_set_rgb_bright);
     matrix_set_orient(s_set_mx_ori);
     matrix_set_idle(s_set_mx_idle);
-    ESP_LOGI(TAG, "display applied: flip=%u rgb=%u ori=%u idle=%u fx=%u",
-             s_set_tft_flip, s_set_rgb_bright, s_set_mx_ori,
+    ESP_LOGI(TAG, "display applied: rgb=%u ori=%u idle=%u fx=%u",
+             s_set_rgb_bright, s_set_mx_ori,
              s_set_mx_idle, s_set_mx_fx);
 }
 
-uint8_t car_get_rgb_bright(void) { return s_set_rgb_bright; }
+uint8_t car_get_rgb_bright(void) { return s_set_rgb_bright; }   /* 1..100% */
 void car_set_rgb_bright(uint8_t v)
 {
-    if (v < 10) v = 10;
-    if (v > 72) v = 72;
+    if (v < 1) v = 1;
+    if (v > 100) v = 100;
     s_set_rgb_bright = v;
-    matrix_set_brightness(v);   /* live */
-}
-uint8_t car_get_tft_flip(void) { return s_set_tft_flip; }
-void car_set_tft_flip(uint8_t v)
-{
-    s_set_tft_flip = v ? 1 : 0;
-    tft_set_flip(s_set_tft_flip != 0);   /* live */
+    matrix_set_brightness_pct(v);   /* live */
 }
 uint8_t car_get_mx_ori(void) { return s_set_mx_ori; }
 void car_set_mx_ori(uint8_t v)
@@ -394,8 +398,7 @@ void car_settings_factory_reset(void)
     s_roof_mode       = ROOF_LIGHT_POLICE;
     s_roof_bright     = 70;
     s_roof_col        = 0;
-    s_set_rgb_bright  = 50;
-    s_set_tft_flip    = 0;
+    s_set_rgb_bright  = 70;
     s_set_mx_ori      = 0;
     s_set_mx_idle     = 0;
     s_set_mx_fx       = 1;
@@ -470,61 +473,52 @@ static void motors_apply(void)
 static bool s_us_front_ok; /* front sensor ne real echo diya? (noise ignore) */
 static bool s_us_beep_mute = true; /* default silent */
 
+/* Non-blocking ultrasonic (Oct 2026 lag fix): echo edges timestamped in a
+   GPIO ISR (32-bit us, wrap-safe); trig fired round-robin one sensor per
+   loop; result collected next loop. Zero blocking (was up to 12 ms). */
+static const gpio_num_t S_ECHO_PIN[3] = {
+    (gpio_num_t)PIN_US_ECHO_L, (gpio_num_t)PIN_US_ECHO_R, (gpio_num_t)PIN_US_ECHO_F,
+};
+/* idx 0=L(dist[0]) 1=R(dist[2]) 2=F(dist[1]) */
+static volatile uint32_t s_erise[3], s_efall[3];
+static volatile bool s_edone[3];
+static uint32_t s_etrig[3];
+static void IRAM_ATTR us_echo_isr(void *arg)
+{
+    int idx = (int)(intptr_t)arg;
+    uint32_t t = (uint32_t)esp_timer_get_time();
+    if (gpio_get_level(S_ECHO_PIN[idx])) {
+        s_erise[idx] = t; s_efall[idx] = 0; s_edone[idx] = false;
+    } else if (s_erise[idx]) {
+        s_efall[idx] = t; s_edone[idx] = true;
+    }
+}
 static void us_read(void)
 {
-    /* Round-robin 3 sensors: L,R,F -> ~5ms max per call (was 16ms blocking) */
     static uint8_t seq = 0;
     static uint16_t s_us_last = 0;
     static uint8_t s_us_cnt = 0;
     static uint32_t s_us_ok_since = 0;
-    seq = (seq + 1) % 3;
-
-    // Helper: reduced timeout 12000us ( ~200cm) and lighter yield (every 60us)
-    if (seq == 0) { /* LEFT */
-        gpio_set_level(PIN_US_TRIG_L, 1); esp_rom_delay_us(10); gpio_set_level(PIN_US_TRIG_L, 0);
-        int64_t rise = 0, fall = 0;
-        int64_t t0 = esp_timer_get_time();
-        while (esp_timer_get_time() - t0 < 12000) {
-            if (!rise && gpio_get_level(PIN_US_ECHO_L)) rise = esp_timer_get_time();
-            else if (rise && !fall && !gpio_get_level(PIN_US_ECHO_L)) fall = esp_timer_get_time();
-            if (rise && fall) break;
-            esp_rom_delay_us(10);
-            if ((esp_timer_get_time() - t0) % 200 < 10) taskYIELD();
+    seq = (uint8_t)((seq + 1) % 3);
+    uint8_t prev = (uint8_t)((seq + 2) % 3);   /* triggered last loop */
+    uint8_t di = prev == 0 ? 0 : (prev == 1 ? 2 : 1);
+    uint32_t now_us = (uint32_t)esp_timer_get_time();
+    /* collect prev (echo always done: pulse <= 25 ms < loop period) */
+    if (s_etrig[prev] != 0) {
+        uint16_t cm = 65535;
+        if (s_edone[prev] && s_efall[prev] > s_erise[prev] &&
+            s_erise[prev] >= s_etrig[prev]) {
+            cm = (uint16_t)((s_efall[prev] - s_erise[prev]) / 58);
+            if (cm > 400) cm = 400;
+            s_edone[prev] = false;   /* consumed */
+        } else if ((uint32_t)(now_us - s_etrig[prev]) > 30000) {
+            cm = 65535;   /* timeout: no echo */
+        } else {
+            cm = g.dist[di];   /* not ready yet: hold last */
         }
-        if (rise && fall) {
-            uint16_t cm = (uint16_t)((fall - rise) / 58);
-            g.dist[0] = cm > 400 ? 400 : cm;
-        } else g.dist[0] = 65535;
-    } else if (seq == 1) { /* RIGHT */
-        gpio_set_level(PIN_US_TRIG_R, 1); esp_rom_delay_us(10); gpio_set_level(PIN_US_TRIG_R, 0);
-        int64_t rise = 0, fall = 0;
-        int64_t t0 = esp_timer_get_time();
-        while (esp_timer_get_time() - t0 < 12000) {
-            if (!rise && gpio_get_level(PIN_US_ECHO_R)) rise = esp_timer_get_time();
-            else if (rise && !fall && !gpio_get_level(PIN_US_ECHO_R)) fall = esp_timer_get_time();
-            if (rise && fall) break;
-            esp_rom_delay_us(10);
-            if ((esp_timer_get_time() - t0) % 200 < 10) taskYIELD();
-        }
-        if (rise && fall) {
-            uint16_t cm = (uint16_t)((fall - rise) / 58);
-            g.dist[2] = cm > 400 ? 400 : cm;
-        } else g.dist[2] = 65535;
-    } else if (seq == 2) { /* FRONT */
-        gpio_set_level(PIN_US_TRIG_F, 1); esp_rom_delay_us(10); gpio_set_level(PIN_US_TRIG_F, 0);
-        int64_t rise = 0, fall = 0;
-        int64_t t0 = esp_timer_get_time();
-        while (esp_timer_get_time() - t0 < 12000) {
-            if (!rise && gpio_get_level(PIN_US_ECHO_F)) rise = esp_timer_get_time();
-            else if (rise && !fall && !gpio_get_level(PIN_US_ECHO_F)) fall = esp_timer_get_time();
-            if (rise && fall) break;
-            esp_rom_delay_us(10);
-            if ((esp_timer_get_time() - t0) % 200 < 10) taskYIELD();
-        }
-        if (rise && fall) {
-            uint16_t cm = (uint16_t)((fall - rise) / 58);
-            g.dist[1] = cm > 400 ? 400 : cm;
-            if (cm > 2 && cm < 400) {
+        g.dist[di] = cm;
+        if (prev == 2) {   /* FRONT filter (unchanged logic) */
+            if (cm != 65535 && cm > 2 && cm < 400) {
                 if (s_us_last && (cm > s_us_last + s_us_last / 4 || cm < s_us_last - s_us_last / 4)) {
                     s_us_cnt = 0;
                     if (s_us_front_ok && s_us_ok_since && now_ms() - s_us_ok_since > 2000) s_us_front_ok = false;
@@ -537,16 +531,22 @@ static void us_read(void)
                     s_us_front_ok = false;
                     s_us_cnt = 0;
                 }
-            }
-        } else {
-            g.dist[1] = 65535;
-            // if no echo for 3s, invalidate front_ok
-            if (s_us_ok_since && now_ms() - s_us_ok_since > 3000) {
-                s_us_front_ok = false;
-                s_us_cnt = 0;
+            } else {
+                if (s_us_ok_since && now_ms() - s_us_ok_since > 3000) {
+                    s_us_front_ok = false;
+                    s_us_cnt = 0;
+                }
             }
         }
     }
+    /* trigger current sensor */
+    gpio_num_t tp = seq == 0 ? (gpio_num_t)PIN_US_TRIG_L :
+                    seq == 1 ? (gpio_num_t)PIN_US_TRIG_R : (gpio_num_t)PIN_US_TRIG_F;
+    s_erise[seq] = 0; s_efall[seq] = 0; s_edone[seq] = false;
+    gpio_set_level(tp, 1);
+    esp_rom_delay_us(10);
+    gpio_set_level(tp, 0);
+    s_etrig[seq] = (uint32_t)esp_timer_get_time();
     g.dist[3] = 65535; // rear removed
     // global timeout: if front_ok but no success for 3s, clear
     if (s_us_front_ok && s_us_ok_since && now_ms() - s_us_ok_since > 3500) {
@@ -557,154 +557,7 @@ static void us_read(void)
 /* -------------------------------- battery ------------------------------- */
 // Battery function REMOVED - GPIO1 now used for motor UART TX, GPIO14 = backlight relay
 
-/* --------------------------------- OLED --------------------------------- */
-
-static i2c_master_dev_handle_t s_oled;
-static i2c_master_bus_handle_t s_bus;
-static uint8_t s_fb[1024];
-static uint8_t s_txb[1025];
-
-static void oled_cmd(uint8_t c)
-{
-    uint8_t b[2] = { 0x00, c };
-    i2c_master_transmit(s_oled, b, 2, 50);
-}
-
-static void oled_flush(void)
-{
-    s_txb[0] = 0x40;
-    memcpy(s_txb + 1, s_fb, 1024);
-    i2c_master_transmit(s_oled, s_txb, 1025, 100);
-}
-
-static void oled_px(int x, int y, bool on)
-{
-    if (x < 0 || x > 127 || y < 0 || y > 63) {
-        return;
-    }
-    uint8_t *p = &s_fb[(y >> 3) * 128 + x];
-    if (on) {
-        *p |= (uint8_t)(1u << (y & 7));
-    } else {
-        *p &= (uint8_t)~(1u << (y & 7));
-    }
-}
-
-static void oled_clear(void)
-{
-    memset(s_fb, 0, sizeof(s_fb));
-}
-
-static void oled_rect(int x1, int y1, int x2, int y2, bool fill)
-{
-    for (int y = y1; y <= y2; y++) {
-        for (int x = x1; x <= x2; x++) {
-            if (fill || x == x1 || x == x2 || y == y1 || y == y2) {
-                oled_px(x, y, true);
-            }
-        }
-    }
-}
-
-static const uint8_t FONT5x7[95][5] = {
-    {0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x5F,0x00,0x00},
-    {0x00,0x07,0x00,0x07,0x00},{0x14,0x7F,0x14,0x7F,0x14},
-    {0x24,0x2A,0x7F,0x2A,0x12},{0x23,0x13,0x08,0x64,0x62},
-    {0x36,0x49,0x55,0x22,0x50},{0x00,0x05,0x03,0x00,0x00},
-    {0x00,0x1C,0x22,0x41,0x00},{0x00,0x41,0x22,0x1C,0x00},
-    {0x08,0x2A,0x1C,0x2A,0x08},{0x08,0x08,0x3E,0x08,0x08},
-    {0x00,0x50,0x30,0x00,0x00},{0x08,0x08,0x08,0x08,0x08},
-    {0x00,0x60,0x60,0x00,0x00},{0x20,0x10,0x08,0x04,0x02},
-    {0x3E,0x51,0x49,0x45,0x3E},{0x00,0x42,0x7F,0x40,0x00},
-    {0x42,0x61,0x51,0x49,0x46},{0x21,0x41,0x45,0x4B,0x31},
-    {0x18,0x14,0x12,0x7F,0x10},{0x27,0x45,0x45,0x45,0x39},
-    {0x3C,0x4A,0x49,0x49,0x30},{0x01,0x71,0x09,0x05,0x03},
-    {0x36,0x49,0x49,0x49,0x36},{0x06,0x49,0x49,0x29,0x1E},
-    {0x00,0x36,0x36,0x00,0x00},{0x00,0x56,0x36,0x00,0x00},
-    {0x08,0x14,0x22,0x41,0x00},{0x14,0x14,0x14,0x14,0x14},
-    {0x00,0x41,0x22,0x14,0x08},{0x02,0x01,0x51,0x09,0x06},
-    {0x32,0x49,0x79,0x41,0x3E},{0x7E,0x11,0x11,0x11,0x7E},
-    {0x7F,0x49,0x49,0x49,0x36},{0x3E,0x41,0x41,0x41,0x22},
-    {0x7F,0x41,0x41,0x22,0x1C},{0x7F,0x49,0x49,0x49,0x41},
-    {0x7F,0x09,0x09,0x09,0x01},{0x3E,0x41,0x41,0x51,0x32},
-    {0x7F,0x08,0x08,0x08,0x7F},{0x00,0x41,0x7F,0x41,0x00},
-    {0x20,0x40,0x41,0x3F,0x01},{0x7F,0x08,0x14,0x22,0x41},
-    {0x7F,0x40,0x40,0x40,0x40},{0x7F,0x02,0x0C,0x02,0x7F},
-    {0x7F,0x04,0x08,0x10,0x7F},{0x3E,0x41,0x41,0x41,0x3E},
-    {0x7F,0x09,0x09,0x09,0x06},{0x3E,0x41,0x51,0x21,0x5E},
-    {0x7F,0x09,0x19,0x29,0x46},{0x46,0x49,0x49,0x49,0x31},
-    {0x01,0x01,0x7F,0x01,0x01},{0x3F,0x40,0x40,0x40,0x3F},
-    {0x1F,0x20,0x40,0x20,0x1F},{0x3F,0x40,0x38,0x40,0x3F},
-    {0x63,0x14,0x08,0x14,0x63},{0x07,0x08,0x70,0x08,0x07},
-    {0x61,0x51,0x49,0x45,0x43},{0x00,0x7F,0x41,0x41,0x00},
-    {0x02,0x04,0x08,0x10,0x20},{0x00,0x41,0x41,0x7F,0x00},
-    {0x04,0x02,0x01,0x02,0x04},{0x40,0x40,0x40,0x40,0x40},
-    {0x00,0x01,0x02,0x04,0x00},{0x20,0x54,0x54,0x54,0x78},
-    {0x7F,0x48,0x44,0x44,0x38},{0x38,0x44,0x44,0x44,0x20},
-    {0x38,0x44,0x44,0x48,0x7F},{0x38,0x54,0x54,0x54,0x18},
-    {0x08,0x7E,0x09,0x01,0x02},{0x0C,0x52,0x52,0x52,0x3E},
-    {0x7F,0x08,0x04,0x04,0x78},{0x00,0x44,0x7D,0x40,0x00},
-    {0x20,0x40,0x44,0x3D,0x00},{0x7F,0x10,0x28,0x44,0x00},
-    {0x00,0x41,0x7F,0x40,0x00},{0x7C,0x04,0x18,0x04,0x78},
-    {0x7C,0x08,0x04,0x04,0x78},{0x38,0x44,0x44,0x44,0x38},
-    {0x7C,0x14,0x14,0x14,0x08},{0x08,0x14,0x14,0x18,0x7C},
-    {0x7C,0x08,0x04,0x04,0x08},{0x48,0x54,0x54,0x54,0x20},
-    {0x04,0x3F,0x44,0x40,0x20},{0x3C,0x40,0x40,0x20,0x7C},
-    {0x1C,0x20,0x40,0x20,0x1C},{0x3C,0x40,0x30,0x40,0x3C},
-    {0x44,0x28,0x10,0x28,0x44},{0x0C,0x50,0x50,0x50,0x3C},
-    {0x44,0x64,0x54,0x4C,0x44},{0x00,0x08,0x36,0x41,0x00},
-    {0x00,0x00,0x7F,0x00,0x00},{0x00,0x41,0x36,0x08,0x00},
-    {0x08,0x04,0x08,0x10,0x08},
-};
-
-static void oled_text(int x, int y, const char *s)
-{
-    for (; *s; s++) {
-        if (*s < 32 || *s > 126) {
-            continue;
-        }
-        const uint8_t *gr = FONT5x7[*s - 32];
-        for (int c = 0; c < 5; c++) {
-            for (int r = 0; r < 7; r++) {
-                if (gr[c] & (1u << r)) {
-                    oled_px(x + c, y + r, true);
-                }
-            }
-        }
-        x += 6;
-        if (x > 122) {
-            return;
-        }
-    }
-}
-static void oled_text_big(int x, int y, const char *s, int scale)
-{
-    for (; *s; s++) {
-        if (*s < 32 || *s > 126) continue;
-        const uint8_t *gr = FONT5x7[*s - 32];
-        for (int c = 0; c < 5; c++) for(int r=0;r<7;r++) if(gr[c]&(1u<<r)){
-            for(int dy=0;dy<scale;dy++) for(int dx=0;dx<scale;dx++) oled_px(x+c*scale+dx, y+r*scale+dy, true);
-        }
-        // gap
-        x += 6*scale;
-        if (x > 128-6*scale) return;
-    }
-}
-
-static void oled_init(void)
-{
-    static const uint8_t seq[] = {
-        0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40, 0x8D, 0x14,
-        0x20, 0x00, 0xA1, 0xC8, 0xDA, 0x12, 0x81, 0xCF, 0xD9, 0xF1,
-        0xDB, 0x40, 0xA4, 0xA6, 0x2E, 0xAF,
-    };
-    for (size_t i = 0; i < sizeof(seq); i++) {
-        oled_cmd(seq[i]);
-    }
-    oled_clear();
-    oled_flush();
-}
-
+/* Oct 2026: OLED driver removed (hardware removed). I2C bus kept for MPU. */
 /* -------------------------------- gyro ---------------------------------- */
 /* MPU-6500 driver lives in imu_driver.c (imu_driver_init/imu_driver_poll).
    Attached to the shared I2C bus in car_app_main; polled in the main loop. */
@@ -712,6 +565,7 @@ static void oled_init(void)
 /* ------------------------------- LED strip ------------------------------ */
 
 static led_strip_handle_t s_strip;
+static i2c_master_bus_handle_t s_bus;   /* shared I2C (MPU re-attach point) */
 static led_strip_handle_t s_front_l;
 static led_strip_handle_t s_front_r;
 static led_strip_handle_t s_under;
@@ -781,7 +635,7 @@ static void strip_update(uint32_t now)
     uint16_t blink = (now / 500) & 1;          /* indicator blink 1Hz */
     uint16_t fast = (now / 150) & 1;           /* siren/strobe 3.3Hz */
     bool sig_l = g.sig_l, sig_r = g.sig_r;
-    /* auto indicators already set by auto_logic() — no override needed */
+    /* auto indicators already set by auto_logic() ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â no override needed */
 
     /* Front LEDs control (dedicated separate pins 17 and 15) */
     {
@@ -1171,7 +1025,7 @@ static void rumble_start_step(uint8_t i)
     s_seq_gap = false;
 }
 
-/* haptic: trigger rumble L/R (0-255) for ms duration — only if controller connected */
+/* haptic: trigger rumble L/R (0-255) for ms duration ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â only if controller connected */
 static void rumble(uint8_t l, uint8_t r, uint32_t ms)
 {
     rumble_step_t one = { l, r, (uint16_t)ms, 0 };
@@ -1555,7 +1409,7 @@ static void audio_effect_update(uint32_t now)
     uint16_t amp = 5000;
 
     if (false && s_horn_on) {
-        /* old tone horn disabled — custom horn sample used */
+        /* old tone horn disabled ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â custom horn sample used */
         freq = ((now / 130) & 1) ? 620 : 880;
         until = now + 200;
         amp = 6000;
@@ -1647,7 +1501,7 @@ static void audio_effect_update(uint32_t now)
     }
 
     /* master silence: MUTE chip or E-STOP kills scheduled tones
-       (bank voices like sys_estop still play — they bypass this) */
+       (bank voices like sys_estop still play ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â they bypass this) */
     if (g.snd_mute || g.estop) { freq = 0; until = now; amp = 0; }
 
     s_effect_freq = freq;
@@ -1971,7 +1825,7 @@ static void audio_init(void)
 
 /* ------------------------------ input/keys ------------------------------ */
 
-/* ------------------------- AUTO helpers (guide §13) ----------------------- */
+/* ------------------------- AUTO helpers (guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§13) ----------------------- */
 static bool auto_can_enter(const xbox360_pad_t *pad)
 {
     if (g.estop) return false;
@@ -2024,7 +1878,7 @@ static void auto_exit(uint32_t now)
     ESP_LOGI(TAG, "AUTO exited (manual)");
 }
 
-/* premium guide §4: clear e-stop only via START+BACK hold 2s + LT held +
+/* premium guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4: clear e-stop only via START+BACK hold 2s + LT held +
    stationary. No single-button clear. */
 static void estop_input_handle(const xbox360_pad_t *pad, uint32_t now)
 {
@@ -2054,7 +1908,7 @@ static void estop_input_handle(const xbox360_pad_t *pad, uint32_t now)
 }
 /* ============================== input/keys ================================ */
 
-/* Neutral-release lock (premium guide �2.6/�12): after leaving OS/Game/E-stop
+/* Neutral-release lock (premium guide ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½2.6/ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½12): after leaving OS/Game/E-stop
    the car stays drive-locked until BOTH sticks and BOTH triggers read neutral
    continuously for 250 ms. Motors are forced to 0 while locked. */
 static bool     s_drive_locked  = false;
@@ -2072,20 +1926,20 @@ uint16_t car_last_dig(void) { return s_last_dig; }
 
 static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, uint32_t now)
 {
-    /* premium guide §14: unified semantic event layer first. */
+    /* premium guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§14: unified semantic event layer first. */
     input_events_update(dig, now);
 
-    /* AZAM CAR OS 9.0 Part 1 — A/B meaning is 100% context-determined:
+    /* AZAM CAR OS 9.0 Part 1 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â A/B meaning is 100% context-determined:
        CLOCK_STANDBY: A/B dead (no-op) | DRIVE: A=headlight/mist/pass,
        B=roof/panel/cycle | OS/MENU: A=confirm, B=back | GAME: game-defined,
        B=exit | MODAL: A=confirm, B=cancel | ESTOP: A/B dead (GUIDE only).
-       9.0 Part 3 RULE 1: this switch is the SINGLE router — exactly one
+       9.0 Part 3 RULE 1: this switch is the SINGLE router ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â exactly one
        handler below ever sees a frame's events, so DRIVE logic can never
        observe a press made inside OS/GAME/BOOT/ESTOP (or future STANDBY). */
     /* arm the lock on every DRIVE re-entry (from OS/Game/Estop) + 9.0 RULE 2:
        ANY context change flushes in-flight button events (sticks already
        covered by the 250ms neutral-release lock below; this extends the
-       same principle to A/B/X/Y/D-pad/LB/RB — a held-through button gets
+       same principle to A/B/X/Y/D-pad/LB/RB ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â a held-through button gets
        no tap/hold/double/edge in the new context, only a fresh press). */
     {
         input_context_t ctx_now = os_context();
@@ -2097,7 +1951,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
                      (int)ctx_prev, (int)ctx_now);
             s_ctx_prev = ctx_now;
         }
-        /* entering CLOCK_IDLE: lock everything visibly OFF — lights,
+        /* entering CLOCK_IDLE: lock everything visibly OFF ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â lights,
            signals, roof, mist, horn, siren. (Motors/engine die via the
            parked gate.) The user re-enables lights with A/B/Y/D-pad. */
         if (ctx_now == INPUT_CTX_STANDBY && ctx_prev != INPUT_CTX_STANDBY) {
@@ -2126,7 +1980,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
     last_now = now;
     if (dt_ms > 100) dt_ms = 100;           /* clamp */
 
-    /* ==== PRIORITY 1 (guide §15): GUIDE tap = global e-stop toggle ========= */
+    /* ==== PRIORITY 1 (guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§15): GUIDE tap = global e-stop toggle ========= */
     if (ev_tap(B_GUIDE)) {
         /* MPU rollover sticky lockout (1.md 4.3): GUIDE tap acks it when
            stationary - E-STOP-class, manual only. Alexa CANNOT clear
@@ -2187,9 +2041,9 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         input_consume_all();
         return;
     }
-    /* GUIDE hold = NO action (premium guide §4: no reboot on any hold) */
+    /* GUIDE hold = NO action (premium guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4: no reboot on any hold) */
 
-    /* ===== PRIORITY 2 (guide §15): controller disconnected = safe ======== */
+    /* ===== PRIORITY 2 (guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§15): controller disconnected = safe ======== */
     if (!pad || !pad->present) {
         s_horn_on = false;
         s_y_held  = false;
@@ -2200,7 +2054,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         return;                      /* safe outputs forced in drive_output */
     }
 
-    /* ==== PRIORITY 3 (guide §15): route by the unified context =========== */
+    /* ==== PRIORITY 3 (guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§15): route by the unified context =========== */
     switch (os_context()) {
     case INPUT_CTX_ESTOP:
         estop_input_handle(pad, now);
@@ -2241,7 +2095,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
 
     /* ================= DRIVE context: premium controls ===================== */
 
-    /* Neutral-release lock evaluation (guide �2.6): 250 ms continuous neutral */
+    /* Neutral-release lock evaluation (guide ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½2.6): 250 ms continuous neutral */
     if (s_drive_locked) {
         bool neutral = pad &&
             stick_dz(pad->lx) == 0 && stick_dz(pad->ly) == 0 &&
@@ -2258,7 +2112,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         }
     }
 
-    /* AUTO restricted sub-context (guide §13): only X exits AUTO here; LT and
+    /* AUTO restricted sub-context (guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§13): only X exits AUTO here; LT and
        stick manual takeover live in auto_logic. Everything else blocked. */
     if (g.mode == MODE_AUTO) {
         if (ev_tap(B_X)) {
@@ -2273,7 +2127,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         return;
     }
 
-    /* X: tap = drive-mode preview overlay, hold 1s = AUTO request (§5.2/§13) */
+    /* X: tap = drive-mode preview overlay, hold 1s = AUTO request (ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§5.2/ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§13) */
     /* PART 8 M3 (future foundation): X double-tap = 3s listen buffer */
     if (ev_double(B_X)) {
         if (mic_listen_start()) {
@@ -2303,7 +2157,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         input_consume(B_X);
     }
 
-    /* A: tap = headlight, hold 700ms = mist toggle (§5.2) */
+    /* A: tap = headlight, hold 700ms = mist toggle (ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§5.2) */
     if (ev_tap(B_A)) {
         g.headlight = !g.headlight;
         play_shot(_binary_a_click_wav_start, _binary_a_click_wav_end, 800);
@@ -2450,7 +2304,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
     /* D-pad */
     if (tap & B_DUP)    { g.hazard = !g.hazard; s_blip_until = now + 60; s_blip_freq = 1200; }
     /* D-pad UP hold 1 s = Quick settings sheet (BACK alternative).
-       The press edge already toggled hazard above — undo it so a hold
+       The press edge already toggled hazard above ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â undo it so a hold
        never flips hazard as a side effect. */
     if (ev_hold(B_DUP, 1000)) {
         g.hazard = !g.hazard;
@@ -2470,7 +2324,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         s_blip_freq = g.rear_light_on ? 1200 : 600;
     }
     /* PART 12: D-Down hold = ALL LIGHTS master off/on.
-       The press edge above already toggled rear_light — exclude it from
+       The press edge above already toggled rear_light ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â exclude it from
        the decision, else "all were off + hold" computes ON then turns OFF. */
     if (ev_hold(B_DDOWN, IE_STD_HOLD_MS)) {
         bool any_on = g.headlight || g.hazard || g.sig_l || g.sig_r ||
@@ -2650,7 +2504,7 @@ static const char *ast_name(uint8_t ast)
     }
 }
 
-/* proportional wall steer: distance → steering correction */
+/* proportional wall steer: distance ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ steering correction */
 static int16_t wall_steer(uint16_t side_dist)
 {
     if (side_dist < 15)  return 50;   /* very close: strong push */
@@ -2677,7 +2531,7 @@ static uint8_t best_turn(uint16_t l, uint16_t r)
 }
 
 /* BUG-fix 2026-09-17: AST_SEARCH ka "3s me give up" branch kabhi reach nahi
-   hota tha — us hi case me g.ast_t0 har 500ms reset hota hai, isliye el
+   hota tha ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â us hi case me g.ast_t0 har 500ms reset hota hai, isliye el
    (now - ast_t0) 3000 tak pahunch hi nahi sakta tha. Ab alag timer. */
 static uint32_t s_search_t0;
 
@@ -2706,10 +2560,10 @@ static void auto_logic(const xbox360_pad_t *pad, uint32_t now)
         else              spd = 5;
 
         /* proportional wall following */
-        if (l < 60) st += wall_steer(l);   /* wall on left → steer right */
-        if (r < 60) st -= wall_steer(r);   /* wall on right → steer left */
+        if (l < 60) st += wall_steer(l);   /* wall on left ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ steer right */
+        if (r < 60) st -= wall_steer(r);   /* wall on right ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ steer left */
 
-        /* critical: front too close → reverse */
+        /* critical: front too close ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ reverse */
         if (f < 35) {
             g.ast = AST_REVERSE;
             g.ast_t0 = now;
@@ -2843,7 +2697,7 @@ static void auto_logic(const xbox360_pad_t *pad, uint32_t now)
 
     /* ======================== REVERSE: back up ======================== */
     case AST_REVERSE:
-        /* rear blocked → don't reverse, turn instead */
+        /* rear blocked ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ don't reverse, turn instead */
         if (b != 65535 && b < 20) {
             uint8_t turn = best_turn(l, r);
             if (turn_clear(turn, l, r)) g.ast = turn; else g.ast = (turn==AST_TURN_L?AST_TURN_R:AST_TURN_L);
@@ -2871,7 +2725,7 @@ static void auto_logic(const xbox360_pad_t *pad, uint32_t now)
     case AST_ESCAPE:
         if (el < 40) rumble(200, 200, 300);
         if (g.esc_phase == 0) {
-            /* phase 0: reverse — check rear */
+            /* phase 0: reverse ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â check rear */
             if (b != 65535 && b < 15) {
                 g.esc_phase = 1; g.esc_t0 = now; rumble(150,150,200);
             }
@@ -3057,7 +2911,7 @@ static void manual_logic(const xbox360_pad_t *pad, uint16_t dig, uint32_t now)
     float st = s_st_s;
     st = st * st * st; /* steering curve: halka = soft */
 
-    /* RT (Right Trigger): PROPORTIONAL to gear cap — halka dabao = low % of gear,
+    /* RT (Right Trigger): PROPORTIONAL to gear cap ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â halka dabao = low % of gear,
        poore dabao = full gear %. Gear1(5%) me 50% RT = 2.5% speed, 100% RT = 5% */
     float cap_raw = pad->rt / 255.0f;
     if (cap_raw < 0.05f) cap_raw = 0;            // tiny deadzone
@@ -3071,9 +2925,9 @@ static void manual_logic(const xbox360_pad_t *pad, uint16_t dig, uint32_t now)
     if (g.turbo) {
         cap = 1.0f; // turbo state (RB hold >=250ms) = 100% instant
     } else {
-        /* Car OS: settings SPEED CAP + virtual gear cap — PROPORTIONAL */
+        /* Car OS: settings SPEED CAP + virtual gear cap ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â PROPORTIONAL */
         float capmax = car_speed_cap_pct() / 100.0f;
-        cap = cap * capmax;  // proportional: RT% × gear%
+        cap = cap * capmax;  // proportional: RT% ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â gear%
         if (g.mode == MODE_CRAWL) cap *= 0.5f; // crawl = half again
     }
 
@@ -3153,7 +3007,7 @@ static void manual_logic(const xbox360_pad_t *pad, uint16_t dig, uint32_t now)
         servo_deg(LEDC_CHANNEL_1, 90);
         g.cannon_reset = false;
     } else {
-        /* right stick ko full rotation do: typical stick ~±16000 hota hai,
+        /* right stick ko full rotation do: typical stick ~ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±16000 hota hai,
            32767 nahi - isliye amplify + clamp (0..180) + smoothing */
         static float s_rx_s, s_ry_s;
         s_rx_s += ((float)stick_dz(pad->rx) - s_rx_s) * 0.25f;
@@ -3204,7 +3058,7 @@ static void drive_output(uint32_t now, const xbox360_pad_t *pad)
 
     /* 200ms safety cutoff: if no controller signal, IMMEDIATE motor stop.
        Uses USB-level timestamp (xbox360_last_data_ms) so idle controller
-       reports also keep the timeout from triggering — only true disconnect
+       reports also keep the timeout from triggering ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â only true disconnect
        or controller-off stops the motors. */
     if (now - xbox360_last_data_ms() > 200) {
         g.tgt_l = 0;
@@ -3226,13 +3080,13 @@ static void drive_output(uint32_t now, const xbox360_pad_t *pad)
        RT trigger = stationary rev (proportional, dead-zone applied).
        Menu/game (parked) ya estop me engine silent. */
     {
-        /* absolute wheel speed — pick larger magnitude */
+        /* absolute wheel speed ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â pick larger magnitude */
         int16_t a = g.cur_l, b = g.cur_r;
         if (a < 0) a = (int16_t)-a;
         if (b < 0) b = (int16_t)-b;
         int16_t spd_now = a > b ? a : b;
 
-        /* RT trigger: dead-zone (ignore <20), then proportional 0..200 → 0..100 */
+        /* RT trigger: dead-zone (ignore <20), then proportional 0..200 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ 0..100 */
         int16_t rt_rev = 0;
         if (pad && !g.estop && pad->rt > 20) {
             uint32_t rt = pad->rt;
@@ -3241,7 +3095,7 @@ static void drive_output(uint32_t now, const xbox360_pad_t *pad)
         }
 
         int16_t es = spd_now > rt_rev ? spd_now : rt_rev;
-        /* engine lifecycle: the loop runs forever in audio_task — only this
+        /* engine lifecycle: the loop runs forever in audio_task ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â only this
            speed word moves, so the loop is never restarted from here.
            IDLE/HOME/menus/games/ARMING (parked) = 0; DRIVE entry ramps an
            audible idle in over ~600 ms; leaving DRIVE fades out over
@@ -3327,7 +3181,7 @@ static void drive_output(uint32_t now, const xbox360_pad_t *pad)
     gpio_set_level(PIN_REAR_LIGHT, g.rear_light_on ? 0 : 1);
 
     /* startup engine sound -> mist sync: two cranks 2-26% and 48-89% of 14.28s file (8000Hz->22050).
-       Only sync when NOT parked (menu/game) — prevents relay clicking in menus. */
+       Only sync when NOT parked (menu/game) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â prevents relay clicking in menus. */
     if (!os_parked()) {
         bool sa=false; float prog=0;
         portENTER_CRITICAL(&s_wav_mux);
@@ -3383,48 +3237,7 @@ static void drive_output(uint32_t now, const xbox360_pad_t *pad)
 }
 
 /* --------------------------------- HUD ---------------------------------- */
-
-static void hud_update(void)
-{
-    char line[32];
-    oled_clear();
-    uint16_t l = g.dist[0], f = g.dist[1], r = g.dist[2];
-    // Top bar: MODE (battery removed, GPIO1 now for backlight)
-    const char *mstr = g.mode==MODE_AUTO?"AUTO": g.mode==MODE_CRAWL?"CRAWL":"MANUAL";
-    snprintf(line,sizeof(line),"%s",mstr);
-    oled_text(0, 0, line);
-    // battery removed - show speed hint instead
-    snprintf(line,sizeof(line),"%d%%", (abs(g.cur_l)+abs(g.cur_r))/2);
-    oled_text(90, 0, line);
-    // signal icons small
-    if(g.hazard) oled_text(112, 0, "H");
-    else if(g.sig_l) oled_text(112,0,"<");
-    else if(g.sig_r) oled_text(112,0,">");
-
-    // BIG FRONT distance centered
-    if(f==65535) snprintf(line,sizeof(line),"---");
-    else if(f<15) snprintf(line,sizeof(line),"STOP");
-    else snprintf(line,sizeof(line),"%3u", f);
-    // center big
-    int len=strlen(line);
-    int w=len*6*3;
-    int x=(128-w)/2;
-    if(f<15) oled_text_big(x, 14, line, 2); // STOP smaller to fit
-    else oled_text_big(x, 14, line, 3);
-    oled_text(48, 38, "cm");
-    if(f<30 && f!=65535) oled_rect(0,12,128,32,false);
-
-    // Bottom: L and R small + speed
-    if(l==65535) snprintf(line,sizeof(line),"L --"); else snprintf(line,sizeof(line),"L%3u",l);
-    oled_text(0, 50, line);
-    if(r==65535) snprintf(line,sizeof(line),"R --"); else snprintf(line,sizeof(line),"R%3u",r);
-    oled_text(70, 50, line);
-    int spd=(abs(g.cur_l)+abs(g.cur_r))/2;
-    snprintf(line,sizeof(line),"%d%%", spd);
-    oled_text(104, 50, line);   /* BUG-fix: x=110 pe "100%" clip hota tha (128px screen) */
-
-    oled_flush();
-}
+/* Oct 2026: hud_update removed (OLED hardware removed). */
 
 /* ------------------------- Car OS external API --------------------------- */
 
@@ -3484,18 +3297,7 @@ uint8_t car_speed_cap_pct(void)
     return s_set_speed_cap < gc ? s_set_speed_cap : gc;
 }
 
-/* OLED wrappers (os_oled.c renders through these) */
-void osd_oled_clear(void) { oled_clear(); }
-
-void osd_oled_rect(int x1, int y1, int x2, int y2, bool fill) { oled_rect(x1, y1, x2, y2, fill); }
-
-void osd_oled_text(int x, int y, const char *s) { oled_text(x, y, s); }
-
-void osd_oled_text_big(int x, int y, const char *s, int scale) { oled_text_big(x, y, s, scale); }
-
-void osd_oled_flush(void) { oled_flush(); }
-
-void car_oled_hud(void) { hud_update(); }
+/* Oct 2026: OLED wrappers + legacy HUD removed (hardware removed). */
 
 /* game SFX (embedded WAVs + synth blips) */
 void car_sfx_click(void)
@@ -3527,103 +3329,7 @@ void car_sfx_blip(uint16_t freq)
 
 /* ------------------------------ self test ------------------------------- */
 
-/* Instant-boot: self_test removed from the boot path (servo sweep + beeps +
-   LED tests cost seconds). Servos are already centered in hw_init. Kept for
-   manual diagnostics; call it explicitly if needed. */
-static void __attribute__((unused)) self_test(void)
-{
-    oled_clear();
-    oled_text(0, 0, "SELF TEST");
-    oled_text(0, 16, "SERVO SWEEP...");
-    oled_flush();
-
-    /* AUDIO SELF-TEST: loud 1s 800Hz beep.
-       Agar ye Nahi sunai de -> amp ki DIN wire abhi bhi purane GPIO35 par hai.
-       Firmware ab DIN = GPIO 40 par output karta hai (35 = octal PSRAM). */
-    ESP_LOGI(TAG, "AUDIO SELF-TEST: 1s beep — sunai de to I2S OK (DIN=GPIO40)");
-    s_sweep_until = now_ms() + 1000;
-    s_sweep_f0 = 800;
-    s_sweep_f1 = 800;
-    s_sweep_amp = 9000;
-    for (int i = 0; i < 100; i++) {
-        audio_effect_update(now_ms());
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    s_sweep_until = now_ms(); /* beep off */
-
-    for (int d = 0; d <= 180; d += 30) {
-        servo_deg(LEDC_CHANNEL_0, d);
-        servo_deg(LEDC_CHANNEL_1, 180 - d);
-        vTaskDelay(pdMS_TO_TICKS(30));
-    }
-    servo_deg(LEDC_CHANNEL_0, 90);
-    servo_deg(LEDC_CHANNEL_1, 90);
-    for (int d = 0; d <= 90; d += 30) {
-        servo_deg(LEDC_CHANNEL_3, d);
-        vTaskDelay(pdMS_TO_TICKS(30));
-    }
-    servo_deg(LEDC_CHANNEL_3, 0);
-
-    /* ignition crank (MAX98357A): starter motor jaisi gaddar awaaz */
-    s_sweep_until = now_ms() + 250;
-    s_sweep_f0 = 140;
-    s_sweep_f1 = 45;
-    s_sweep_amp = 3500;
-    for (int i = 0; i < 26; i++) { audio_effect_update(now_ms()); vTaskDelay(pdMS_TO_TICKS(10)); }
-
-    /* DEDICATED STRIP & FRONT LED HARDWARE TEST AT BOOT */
-    ESP_LOGI(TAG, "RUNNING LED HARDWARE TEST...");
-    
-    /* 1. Test Rear Strip pixels (0=left,1=right; hw triples each to 3 physical LEDs) */
-    for (int i = 0; i < LED_STRIP_NUM; i++) {
-        led_strip_clear(s_strip);
-        strip_px(i, 255, 255, 255); // White test on each rear LED
-        led_strip_refresh(s_strip);
-        vTaskDelay(pdMS_TO_TICKS(80));
-    }
-    led_strip_clear(s_strip);
-    led_strip_refresh(s_strip);
-
-    /* 2. Test Front Left LED (WS2812, pin 17) via RMT - NOT plain GPIO */
-    if (s_front_l) {
-        led_strip_set_pixel(s_front_l, 0, 255, 255, 255);
-        led_strip_refresh(s_front_l);
-        vTaskDelay(pdMS_TO_TICKS(80));
-        led_strip_clear(s_front_l);
-        led_strip_refresh(s_front_l);
-        ESP_LOGI(TAG, "Front Left LED test done");
-    } else {
-        ESP_LOGE(TAG, "Front Left LED NULL - RMT init failed, skipping test");
-    }
-
-    /* 3. Test Front Right LED (WS2812, pin 15) via RMT - NOT plain GPIO */
-    if (s_front_r) {
-        led_strip_set_pixel(s_front_r, 0, 255, 255, 255);
-        led_strip_refresh(s_front_r);
-        vTaskDelay(pdMS_TO_TICKS(80));
-        led_strip_clear(s_front_r);
-        led_strip_refresh(s_front_r);
-        ESP_LOGI(TAG, "Front Right LED test done");
-    } else {
-        ESP_LOGE(TAG, "Front Right LED NULL - RMT init failed, skipping test");
-    }
-
-    /* 4. Test Under-car strip (GPIO 6 daisy-chain, 12 LEDs): quick white blink */
-    if (s_under) {
-        under_set_all(255, 255, 255);
-        vTaskDelay(pdMS_TO_TICKS(80));
-        under_set_all(0, 0, 0);
-        ESP_LOGI(TAG, "Under strip test done (%d LEDs)", UNDER_STRIP_NUM);
-    } else {
-        ESP_LOGW(TAG, "Under strip NULL - RMT init failed/skipped");
-    }
-
-    oled_clear();
-    oled_text(0, 0, "SELF TEST OK");
-    oled_text(0, 16, "DONGLE PLUG KARO");
-    oled_text(0, 32, "X = AUTO MODE");
-    oled_flush();
-}
+/* Oct 2026: self_test + OLED removed (hardware removed). */
 
 /* Early boot splash (instant-boot): shown once after TFT init while hardware
    comes up (~1s). The drive loop takes over immediately after - no anim. */
@@ -3675,9 +3381,13 @@ static void hw_init(void)
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
+        .intr_type = GPIO_INTR_ANYEDGE,   /* Oct 2026: non-blocking echo ISR */
     };
     gpio_config(&in);
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(PIN_US_ECHO_L, us_echo_isr, (void *)(intptr_t)0);
+    gpio_isr_handler_add(PIN_US_ECHO_R, us_echo_isr, (void *)(intptr_t)1);
+    gpio_isr_handler_add(PIN_US_ECHO_F, us_echo_isr, (void *)(intptr_t)2);
 
     /* LEDC: timer0 = servos 50Hz 14-bit, timer1 = motors+lights 20kHz 10-bit,
        timer2 = buzzer tones */
@@ -3746,7 +3456,8 @@ static void hw_init(void)
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM_1, PIN_UART_TX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_ERROR_CHECK(uart_driver_install(UART_NUM_1, 256, 0, 0, NULL, 0));
 
-    /* I2C + OLED (gyro removed - only OLED on bus) */
+    /* I2C bus (OLED removed + MPU removed Oct 2026 - bus kept, no devices).
+       MPU wapas aaye to yahin device add karna. */
     i2c_master_bus_config_t bcfg = {
         .i2c_port = I2C_NUM_0,
         .sda_io_num = PIN_OLED_SDA,
@@ -3756,21 +3467,18 @@ static void hw_init(void)
         .flags.enable_internal_pullup = true,
     };
     ESP_ERROR_CHECK(i2c_new_master_bus(&bcfg, &s_bus));
-    i2c_device_config_t dcfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = OLED_ADDR,
-        .scl_speed_hz = 400000,
-    };
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(s_bus, &dcfg, &s_oled));
-    oled_init();
     /* MPU-6500 shares the same I2C bus (SDA = GPIO 42, SCL = GPIO 41). */
+#if MPU_HW_PRESENT
     imu_driver_init(s_bus);
+#else
+    ESP_LOGW(TAG, "MPU disabled (hardware removed) - IMU guards stay safe");
+#endif
 
     /* LED strip (rear indicator GPIO 6) + UNDER-CAR strip DAISY-CHAINED on the
        same data line: rear strip DOUT -> under strip DIN.
        Pixel map: 0..1 = rear (L/R), 2..13 = under-car (12 LEDs).
        Board pe koi free GPIO nahi bacha (19/20 USB, 26-37 flash+PSRAM,
-       43/44 console UART) — isliye chain approach. */
+       43/44 console UART) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â isliye chain approach. */
     led_strip_config_t sc = {
         .strip_gpio_num = PIN_LED_STRIP,
         .max_leds = LED_STRIP_NUM + UNDER_STRIP_NUM,
@@ -3787,7 +3495,7 @@ static void hw_init(void)
     ESP_ERROR_CHECK(led_strip_new_rmt_device(&sc, &rc, &s_strip));
     led_strip_clear(s_strip);
     led_strip_refresh(s_strip);
-    s_under = s_strip;  /* alias — under_px() offset LED_STRIP_NUM se likhta hai */
+    s_under = s_strip;  /* alias ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â under_px() offset LED_STRIP_NUM se likhta hai */
     ESP_LOGI(TAG, "Rear strip (pin %d, %d px) + under strip daisy-chain (%d px, total %d)",
              PIN_LED_STRIP, LED_STRIP_NUM, UNDER_STRIP_NUM, LED_STRIP_NUM + UNDER_STRIP_NUM);
 
@@ -3827,7 +3535,7 @@ static void hw_init(void)
         ESP_LOGI(TAG, "Front Right LED (pin %d) RMT OK", PIN_FRONT_LED_R);
     }
 
-    /* Under-car strip: alag RMT channel NAHI — rear strip ke saath daisy-chained
+    /* Under-car strip: alag RMT channel NAHI ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â rear strip ke saath daisy-chained
        (upar dekho). Board pe free GPIO nahi bacha tha. */
 
     /* battery ADC */
@@ -3902,11 +3610,14 @@ void car_task(void *arg)
     settings_nvs_load();   /* NVS init ho chuka (advBegin) - saved settings wapas */
     car_roof_apply_saved(); /* roof pattern/brightness from NVS (stays OFF) */
     car_display_apply_saved(); /* TFT flip + matrix RGB/orient/idle from NVS */
+#if MPU_HW_PRESENT
     imu_adv_init();         /* MPU-advanced fast task 100 Hz (1.md PART 4) */
+#endif
     /* PART 15: PSRAM tables now (snd/img/notif) - zero internal statics */
     snd_bank_init();
     img_bank_init();
     notif_init();
+    net_wifi_start();   /* Oct 2026: ex-Alexa task owned this; SNTP clock needs it */
     serpent_arcade_init();   /* NEON SERPENT NVS hiscore load */
     tft_set_brightness(s_set_tft_bright);  /* saved backlight brightness (guide 10/11) */
     settings_nvs_save();   /* persist new defaults if schema changed */
@@ -3941,8 +3652,6 @@ void car_task(void *arg)
     static bool s_arc_was = false;
     static uint32_t s_per_min = 0xFFFFFFFF, s_per_max = 0, s_per_sum = 0,
                     s_per_n = 0, s_per_over = 0, s_per_t0 = 0;
-    static uint32_t s_oled_calls = 0;
-    static uint8_t s_arc_oled_st = 0xFF;
 
     while (1) {
         uint32_t now = now_ms();
@@ -3953,7 +3662,7 @@ void car_task(void *arg)
         if (arcade_on && !s_arc_was) {   /* fresh session: reset P5 stats */
             s_per_min = 0xFFFFFFFF; s_per_max = 0;
             s_per_sum = 0; s_per_n = 0; s_per_over = 0;
-            s_per_t0 = now; s_oled_calls = 0; s_arc_oled_st = 0xFF;
+            s_per_t0 = now;
         }
         if (arcade_on) {   /* P5: loop period min/avg/max + overruns */
             if (last_loop_ms && dt_ms < 100) {
@@ -3964,26 +3673,28 @@ void car_task(void *arg)
             }
             if (!s_per_t0) s_per_t0 = now;
             if (now - s_per_t0 >= 60000 && s_per_n) {
-                ESP_LOGI(TAG, "arc loop: min=%lu avg=%lu max=%lu over20=%lu oled_calls=%lu",
+                ESP_LOGI(TAG, "arc loop: min=%lu avg=%lu max=%lu over20=%lu heapI=%luKB heapP=%lukB stack=%u",
                          (unsigned long)s_per_min,
                          (unsigned long)(s_per_sum / s_per_n),
                          (unsigned long)s_per_max,
                          (unsigned long)s_per_over,
-                         (unsigned long)s_oled_calls);
+                         (unsigned long)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                         (unsigned long)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
+                         (unsigned)uxTaskGetStackHighWaterMark(NULL));
                 s_per_min = 0xFFFFFFFF; s_per_max = 0;
                 s_per_sum = 0; s_per_n = 0; s_per_over = 0;
-                s_per_t0 = now; s_oled_calls = 0;
+                s_per_t0 = now;
             }
         } else if (s_arc_was) {
             s_per_min = 0xFFFFFFFF; s_per_max = 0;
             s_per_sum = 0; s_per_n = 0; s_per_over = 0;
-            s_per_t0 = 0; s_oled_calls = 0; s_arc_oled_st = 0xFF;
+            s_per_t0 = 0;
         }
         const xbox360_pad_t *p0 = xbox360_pad(0);
         const xbox360_pad_t *pad = (p0 && p0->present && xbox360_dongle_connected()) ? p0 : NULL;
         bool cur_present = pad != NULL;
         if (cur_present && !prev_present) {
-            /* just reconnected — failsafe so car moves again.
+            /* just reconnected ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â failsafe so car moves again.
                E-STOP stays latched (GUIDE-tap + stationary clears it):
                auto-clearing here would let deflected sticks drive off. */
             xbox360_rumble(0, 0, 0);
@@ -3996,7 +3707,7 @@ void car_task(void *arg)
             ESP_LOGI(TAG, "controller reconnected (mode=%d)", g.mode);
         }
         if (!cur_present && prev_present) {
-            /* just disconnected — failsafe: motors off */
+            /* just disconnected ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â failsafe: motors off */
             g.tgt_l = g.tgt_r = 0;
             g.estop = true;
             roof_light_force_safe_off();
@@ -4027,13 +3738,18 @@ void car_task(void *arg)
            the IMU has never produced data. Zero cost when healthy. */
         {
             static uint32_t s_imu_retry;
+#if MPU_HW_PRESENT
             if (!motion_radar_imu_is_valid() &&
                 (int32_t)(now - s_imu_retry) >= 0) {
                 s_imu_retry = now + 10000;
                 imu_driver_retry();
             }
+#else
+            (void)s_imu_retry;
+#endif
         }
         mic_poll(now);            /* PART 8 M1: VU 50ms + beat + clap detect */
+        net_wifi_poll(now);       /* SNTP epoch save + WiFi auto-off */
         /* PART 8 M2: double-clap (parked only) toggles headlight */
         if (mic_clap()) {
             bool parked = (g.cur_l == 0 && g.cur_r == 0 &&
@@ -4048,7 +3764,7 @@ void car_task(void *arg)
         }
 
         /* NEON SERPENT arcade (120-LED matrix): active rehte input arcade
-           ka hai — car controls frozen, motors parked. GUIDE kabhi
+           ka hai ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â car controls frozen, motors parked. GUIDE kabhi
            consume nahi hota (car E-STOP hamesha chalta hai). */
         bool arcade_eats = serpent_arcade_route(pad, dig, tap, now);
         {   /* TFT edge cue: entry/exit visible on cockpit */
@@ -4208,7 +3924,7 @@ void car_task(void *arg)
                 s_arm_nt0 = 0;
                 os_request_screen(&s_os, OS_DRIVE_MAIN, now);
             } else if (now - s_os.state_enter_ms >= 8000) {
-                /* safety valve: never freeze forever — back to HOME */
+                /* safety valve: never freeze forever ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â back to HOME */
                 ESP_LOGW(TAG, "arming abort (>8s) -> HOME");
                 s_arm_nt0 = 0;
                 os_request_screen(&s_os, OS_HOME, now);
@@ -4226,18 +3942,7 @@ void car_task(void *arg)
             gfx_push();
         }
         mem_diag_tick(now);         /* PART 15/16: 10s cadence, task ctx */
-        /* B+ OLED gate: suppress periodic redraw in PLAY-ish arcade states;
-           single flush on MENU/PAUSE/GAME_OVER entry (P5 expects 0 in PLAY). */
-        if (serpent_arcade_active()) {
-            uint8_t ast = serpent_arcade_state();
-            if (!serpent_suppress_oled() && ast != s_arc_oled_st) {
-                s_arc_oled_st = ast;
-                s_oled_calls++;
-                os_draw_oled(&s_os, now);
-            }
-        } else {
-            os_draw_oled(&s_os, now);   /* ~12 FPS, per oled_layout */
-        }
+        /* Oct 2026: OLED removed (hardware removed) â€” no OLED redraw. */
 
         /* B+ pacing: fixed 20 ms while arcade active (no relative delay),
            otherwise the legacy relative delay. */

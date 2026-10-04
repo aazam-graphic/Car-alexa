@@ -17,7 +17,6 @@ void os_scr_drive(const os_ctx_t *ctx, uint32_t now);
 void os_scr_analytics(const os_ctx_t *ctx, uint32_t now);
 void os_scr_diag(const os_ctx_t *ctx, uint32_t now);
 void os_scr_settings(const os_ctx_t *ctx, uint32_t now);
-void os_scr_oledctrl(const os_ctx_t *ctx, uint32_t now);
 void os_scr_gameshub(const os_ctx_t *ctx, uint32_t now);
 /* Drive overlays (quick/roof/picker/AUTO preview) drawn above the cockpit.
    os_draw_tft calls ui_cockpit_draw() then this (1.md PART 3). */

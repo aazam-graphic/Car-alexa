@@ -19,6 +19,7 @@
 #include "input_events.h"   /* context-switch flush (T24) */
 #include "nvs_flash.h"
 #include "nvs.h"
+#include <string.h>   /* memset (self-test state setup) */
 
 static const char *TAG = "serpent";
 
@@ -58,6 +59,10 @@ typedef struct {
     cell_t bonus;
     bool bonus_on;
     uint32_t bonus_t0, bonus_until;
+    uint32_t food_t0;      /* food spawn time (fade-in) */
+    uint32_t eat_t0;       /* last eat time (head flash 200 ms) */
+    uint32_t ring_t0;      /* bonus burst start (0 = inactive) */
+    int8_t ring_x, ring_y;
     cell_t patrol;
     bool patrol_on;
     int8_t patrol_dx;
@@ -88,13 +93,19 @@ static uint8_t s_best_level = 1;
 static uint8_t s_sel_level = 1;    /* menu start-level select */
 static uint8_t s_rumble_mode = 1;  /* default SOFT (blueprint v2.0) */
 static bool s_inited = false;
-static uint32_t s_back_t0 = 0, s_b_t0 = 0;
+static uint32_t s_back_t0 = 0;
 static uint32_t s_rumble_until = 0;
 static uint32_t s_dbg = 0;
 static uint32_t s_last_step_ms = 0;   /* P5: step interval stats */
 static uint32_t s_step_min = 0xFFFFFFFF, s_step_max = 0;
 static uint32_t s_stats_t0 = 0;
 static uint32_t s_tick_now = 0;
+static uint32_t s_step_n = 0;     /* P5: steps counted this window */
+static uint32_t s_pause_t0 = 0;   /* bonus timer freeze across pause */
+static bool s_pad_lost = false;   /* latched while pad gone in arcade */
+static bool s_selftest = false;   /* guards sfx/rumble/NVS during self-test */
+static uint8_t s_pending_unlock = 0;  /* best-level unlock deferred to over/exit */
+static bool s_br_dirty = false;       /* brightness changed in-game: save on exit */
 static uint8_t s_last_dead = 0;       /* death reason for TFT */
 /* TFT mirror: logical-index copy + dirty bits (same task, no lock) */
 static uint8_t s_mirror[120][3];
@@ -110,7 +121,7 @@ static void snk_px(int x, int y, rgb_t c)
     int idx = y * fw + x;
     s_mirror[idx][0] = c.r; s_mirror[idx][1] = c.g; s_mirror[idx][2] = c.b;
     snk_mdirt_set(idx);
-    snk_px(x, y, c);
+    matrix_set_xy_rgb(x, y, c);
 }
 static void snk_clear(void)
 {
@@ -121,7 +132,6 @@ static void snk_clear(void)
     matrix_clear();
 }
 
-static const rgb_t C_BODY  = {0, 200, 60};
 static const rgb_t C_HEAD  = {170, 255, 170};
 static const rgb_t C_FOOD  = {255, 30, 30};
 static const rgb_t C_MINE  = {150, 40, 200};
@@ -144,6 +154,7 @@ static rbq_t s_rbq[8];
 static uint8_t s_rbq_n = 0;
 static uint8_t s_rb_cur_sev = 0;
 static uint32_t s_rb_cur_until = 0;
+static uint32_t s_rb_last_write = 0;   /* write-rate guard timestamp */
 
 enum { SEV_TICK, SEV_EAT, SEV_BONUS, SEV_LEVELUP, SEV_CRASH, SEV_HISCORE };
 
@@ -153,6 +164,15 @@ static void rb_raw(uint8_t l, uint8_t r, uint32_t ms, uint32_t now)
     if (!s_rumble_mode) return;
     if (s_rumble_mode == 1) { l /= 2; r /= 2; }
     if (l < 20 && r < 20) return;
+    /* write-rate guard: same values = extend timer only; min 20 ms gap */
+    static uint8_t s_ll = 0xFF, s_lr = 0xFF;
+    if (l == s_ll && r == s_lr) {
+        s_rumble_until = now + ms;
+        s_rb_cur_until = now + ms;
+        return;
+    }
+    if (now - s_rb_last_write < 20) return;   /* drop: dongle flood guard */
+    s_ll = l; s_lr = r; s_rb_last_write = now;
     xbox360_rumble(0, l, r);
     s_rumble_until = now + ms;
     s_rb_cur_until = now + ms;
@@ -199,6 +219,8 @@ static void rumble_tick(uint32_t now)
         if (!s_rbq_n) { xbox360_rumble(0, 0, 0); s_rumble_until = 0; }
     }
     if (!s_rb_cur_until && s_rbq_n) {
+        /* don't pop faster than the write guard allows */
+        if (now - s_rb_last_write < 20) return;
         rbq_t s = s_rbq[0];
         for (int i = 1; i < s_rbq_n; i++) s_rbq[i - 1] = s_rbq[i];
         s_rbq_n--;
@@ -212,11 +234,6 @@ static void rumble_stop_all(uint32_t now)
     (void)now;
     s_rbq_n = 0; s_rb_cur_sev = 0; s_rb_cur_until = 0; s_rumble_until = 0;
     xbox360_rumble(0, 0, 0);
-}
-static void arc_rumble(uint8_t l, uint8_t r, uint32_t ms, uint32_t now)
-{
-    (void)now;
-    rb_play(l, r, (uint16_t)(ms > 0xFFFF ? 0xFFFF : ms), SEV_EAT);
 }
 static void arc_rumble_stop(uint32_t now)
 {
@@ -296,6 +313,7 @@ static void spawn_food(const sp_level_t *L)
         if (!bfs_reachable(x, y, L)) continue;
         s_g.food.x = (int8_t)x; s_g.food.y = (int8_t)y;
         s_g.occ[y * FW + x] = 4;
+        s_g.food_t0 = s_tick_now;
         return;
     }
 }
@@ -401,7 +419,7 @@ static void start_level(uint8_t lv, uint32_t now, bool fresh_run)
         s_g.endless_food = 0;
     }
     s_last_step_ms = 0;   /* P5 stats reset per level */
-    s_step_min = 0xFFFFFFFF; s_step_max = 0;
+    s_step_min = 0xFFFFFFFF; s_step_max = 0; s_step_n = 0;
     ESP_LOGI(TAG, "level %d %s step=%d target=%d", lv, L->name,
              L->step_ms, L->food_target);
 }
@@ -459,6 +477,7 @@ static void do_step(uint32_t now)
     }
     /* grow */
     if (eats || eats_bonus) {
+        s_g.eat_t0 = now;
         if (s_g.length < SERPENT_MAX_LEN) {
             for (int i = s_g.length; i > 0; i--) s_g.body[i] = s_g.body[i - 1];
             s_g.length++;
@@ -475,8 +494,7 @@ static void do_step(uint32_t now)
         uint8_t mult = s_g.level;
         s_g.score += 10u * mult;
         s_g.food_in_level++;
-        car_sfx_score();
-        rb_eat();
+        if (!s_selftest) { car_sfx_score(); rb_eat(); }
         if (s_g.endless) {
             /* B+: step = max(100, 120 - 20*floor(endless_food/5)) */
             s_g.endless_food++;
@@ -489,7 +507,7 @@ static void do_step(uint32_t now)
             if (s_g.bonus_on) {
                 s_g.bonus_t0 = now; s_g.bonus_until = now + 7000;
                 rebuild_occ(L);
-                car_sfx_blip(990);
+                if (!s_selftest) car_sfx_blip(990);
             }
         }
         if (!s_g.endless && s_g.food_in_level >= L->food_target) return; /* clear */
@@ -503,10 +521,13 @@ static void do_step(uint32_t now)
     if (eats_bonus) {
         uint8_t mult = s_g.level;
         s_g.score += (now - s_g.bonus_t0 < 3000) ? 50u * mult : 20u * mult;
+        /* bonus ring burst centre */
+        s_g.ring_x = s_g.bonus.x;
+        s_g.ring_y = s_g.bonus.y;
+        s_g.ring_t0 = now;
         s_g.bonus_on = false;
         rebuild_occ(L);
-        car_sfx_score(); car_sfx_score();
-        rb_bonus();
+        if (!s_selftest) { car_sfx_score(); car_sfx_score(); rb_bonus(); }
     }
     /* patrol every 2 steps */
     {
@@ -583,16 +604,46 @@ static void draw_level_num(uint8_t lv, rgb_t c)
 static void render_menu(uint32_t now)
 {
     snk_clear();
-    /* green snake zigzag + red food icon */
-    bool on = ((now / 400) & 1) == 0;
-    rgb_t snake = on ? C_BODY : (rgb_t){0, 60, 30};
-    snk_px(1, 1, snake); snk_px(2, 1, snake);
-    snk_px(3, 1, snake); snk_px(3, 2, snake);
-    snk_px(4, 2, snake); snk_px(5, 2, snake);
-    snk_px(5, 2, C_HEAD);
-    snk_px(9, 1, C_FOOD);
-    /* selected start level digits */
-    draw_level_num(s_sel_level, (rgb_t){255, 200, 40});
+    /* attract mode: dim demo snake (len 6) circling the inset perimeter */
+    {
+        static cell_t ab[6];
+        static uint8_t adir = 0;   /* 0 R 1 D 2 L 3 U */
+        static uint32_t anext = 0;
+        static bool ainit = false;
+        int fw = matrix_field_w(), fh = matrix_field_h();
+        int x0 = 1, y0 = 1, x1 = fw - 2, y1 = fh - 2;
+        if (!ainit) {
+            for (int i = 0; i < 6; i++) { ab[i].x = (int8_t)(x0 + 2 - i); ab[i].y = (int8_t)y0; }
+            adir = 0; anext = now; ainit = true;
+        }
+        if ((int32_t)(now - anext) >= 0) {
+            anext = now + 150;
+            cell_t nh = ab[0];
+            if (adir == 0) nh.x++; else if (adir == 1) nh.y++;
+            else if (adir == 2) nh.x--; else nh.y--;
+            if (nh.x < x0 || nh.x > x1 || nh.y < y0 || nh.y > y1)
+                adir = (adir + 1) & 3;   /* turn right at corner */
+            else {
+                for (int i = 5; i > 0; i--) ab[i] = ab[i - 1];
+                ab[0] = nh;
+            }
+        }
+        for (int i = 5; i >= 0; i--) {
+            uint8_t v = (uint8_t)(110 - i * 12);
+            snk_px(ab[i].x, ab[i].y, (rgb_t){0, v, (uint8_t)(v / 3)});
+        }
+        snk_px(ab[0].x, ab[0].y, (rgb_t){120, 255, 170});
+        snk_px((fw - 1) / 2, (fh - 1) / 2, C_FOOD);   /* demo food dot */
+    }
+    /* selected start level digits (flash 800 ms on change) */
+    {
+        static uint8_t s_last_lv = 0;
+        static uint32_t s_lv_t0 = 0;
+        if (s_last_lv != s_sel_level) { s_last_lv = s_sel_level; s_lv_t0 = now; }
+        bool flash = (now - s_lv_t0 < 800) && (((now / 150) & 1) == 0);
+        draw_level_num(s_sel_level, flash ? (rgb_t){255, 255, 255}
+                                          : (rgb_t){255, 200, 40});
+    }
     /* rumble mode pips bottom-left (0..2) */
     for (int i = 0; i < (int)s_rumble_mode; i++)
         snk_px(i, FH - 1, (rgb_t){0, 150, 200});
@@ -656,8 +707,13 @@ static void render_play(uint32_t now)
         rgb_t c = p ? C_MINE : (rgb_t){80, 20, 100};
         snk_px(s_g.patrol.x, s_g.patrol.y, c);
     }
-    /* steady red food */
-    snk_px(s_g.food.x, s_g.food.y, C_FOOD);
+    /* steady red food with 150 ms spawn fade-in */
+    {
+        uint32_t age = now - s_g.food_t0;
+        uint8_t b = age >= 150 ? 255 : (uint8_t)(90 + age * 165 / 150);
+        snk_px(s_g.food.x, s_g.food.y,
+               (rgb_t){b, (uint8_t)(30 * b / 255), (uint8_t)(30 * b / 255)});
+    }
     /* bonus: 4 Hz blink last 2 s */
     if (s_g.bonus_on) {
         int32_t left = (int32_t)(s_g.bonus_until - now);
@@ -668,16 +724,35 @@ static void render_play(uint32_t now)
                 for (int dx = 0; dx < 2; dx++)
                     snk_px(s_g.bonus.x + dx, s_g.bonus.y + dy, C_BONUS);
     }
-    /* snake gradient + lime head */
+    /* snake gradient + lime head (+200 ms eat flash, tail->head pulse) */
+    bool eatfx = (now - s_g.eat_t0 < 200);
     for (int i = (int)s_g.length - 1; i >= 0; i--) {
         rgb_t c;
-        if (i == 0) c = C_HEAD;
+        if (i == 0) c = eatfx ? (rgb_t){220, 255, 220} : C_HEAD;
         else {
             uint8_t v = (uint8_t)(200 - (i * 160) / SERPENT_MAX_LEN);
             if (v < 40) v = 40;
+            if (eatfx) v = (uint8_t)(v + (60 * (s_g.length - i)) / s_g.length);
             c.r = 0; c.g = v; c.b = (uint8_t)(v / 4);
         }
         snk_px(s_g.body[i].x, s_g.body[i].y, c);
+    }
+    /* bonus gold ring burst (250 ms expanding ring) */
+    if (s_g.ring_t0 && now - s_g.ring_t0 < 250) {
+        uint32_t re = now - s_g.ring_t0;
+        int r = 1 + (int)(re / 80);   /* 1..3 */
+        uint8_t b = (uint8_t)(255 - re);
+        for (int dy = -3; dy <= 3; dy++) {
+            for (int dx = -3; dx <= 3; dx++) {
+                int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
+                int ch = ax > ay ? ax : ay;
+                if (ch != r) continue;
+                snk_px(s_g.ring_x + dx, s_g.ring_y + dy,
+                       (rgb_t){b, (uint8_t)(170 * b / 255), 0});
+            }
+        }
+    } else {
+        s_g.ring_t0 = 0;
     }
     matrix_show();
 }
@@ -763,11 +838,14 @@ static void render_over(uint32_t now)
 }
 
 /* ---------------- state changes ---------------- */
+static uint8_t s_saved_br = 50;
 static void enter_menu(uint32_t now)
 {
     s_arc = ARC_MENU;
     s_state_t0 = now;
+    if (s_br_dirty) { s_br_dirty = false; car_settings_save(); }   /* persist RGB */
     if (s_sel_level < 1 || s_sel_level > s_best_level) s_sel_level = 1;
+    s_saved_br = car_get_rgb_bright();   /* percent; restore on exit */
     led_matrix_acquire(OWNER_ARCADE);
     led_matrix_set_demo(false);
     led_matrix_set_dim(false);
@@ -775,21 +853,28 @@ static void enter_menu(uint32_t now)
     input_flush_context_switch();   /* hub-held buttons must not leak in */
     car_sfx_click();
     ESP_LOGI(TAG, "arcade MENU (START=start Y/A=level LB/RB=rumble)");
+    ESP_LOGI(TAG, "aud: engvol=%d mute=%d rumble=%d (0=silent game!)",
+             car_get_setting(1), g.snd_mute ? 1 : 0, s_rumble_mode);
     notif_push(NOTIF_RULES, "ARCADE: NEON SERPENT", now);
 }
 static void exit_full(uint32_t now)
 {
     (void)now;
     s_arc = ARC_OFF;
-    s_back_t0 = s_b_t0 = 0;
+    s_back_t0 = 0;
     rumble_stop_all(now);
+    if (s_br_dirty) { s_br_dirty = false; car_settings_save(); }   /* persist RGB */
+    if (s_pending_unlock > s_best_level) s_best_level = s_pending_unlock;
+    s_pending_unlock = 0;
     if (!s_g.practice && s_g.score > s_hiscore && s_g.score > 0) {
         s_hiscore = s_g.score;
         nvs_save_hi();
     }
     led_matrix_safe_off();
+    led_matrix_exit_flash();   /* visible goodbye even if idle == OFF */
     led_matrix_release(OWNER_ARCADE);
     led_matrix_set_demo(true);
+    matrix_set_brightness_pct(s_saved_br);   /* restore user setting */
     matrix_set_dim_pct(100);
     input_flush_context_switch();   /* game-held buttons must not leak out */
     /* hub-launched game: back to hub (HOME path stays where it was) */
@@ -806,6 +891,8 @@ static void game_over(uint32_t now, bool won_endless)
     s_arc = ARC_OVER;
     s_state_t0 = now;
     s_over_t0 = now;
+    if (s_pending_unlock > s_best_level) s_best_level = s_pending_unlock;
+    s_pending_unlock = 0;
     s_new_hiscore = !s_g.practice && s_g.score > s_hiscore && s_g.score > 0;
     if (s_new_hiscore) {
         s_hiscore = s_g.score;
@@ -828,8 +915,10 @@ static void level_clear(uint32_t now)
     uint32_t bonus = 50u * s_g.level;
     if (s_g.winfx) bonus += 500u * s_g.level;   /* WIN_BOARD */
     s_g.score += bonus;
-    car_sfx_score();
-    rb_levelup();
+    if (!s_selftest) {
+        car_sfx_score();
+        rb_levelup();
+    }
     ESP_LOGI(TAG, "level %d clear +%lu score=%lu", s_g.level,
              (unsigned long)bonus, (unsigned long)s_g.score);
     if (s_g.level >= 10) {
@@ -841,15 +930,171 @@ static void level_clear(uint32_t now)
         }
         s_arc = ARC_CLEAR;   /* short fx then replay L10 faster */
     } else {
-        if (s_g.level + 1 > s_best_level) {
-            s_best_level = (uint8_t)(s_g.level + 1);
-            nvs_save_hi();
-        }
+        /* unlock deferred to game-over/exit (never NVS in PLAY) */
+        if (s_g.level + 1 > s_best_level && s_g.level + 1 > s_pending_unlock)
+            s_pending_unlock = (uint8_t)(s_g.level + 1);
         s_arc = ARC_CLEAR;
     }
     s_fx_t0 = now;
     s_state_t0 = now;
     (void)L;
+}
+
+/* ---------------- on-target self-test (no host compiler on this PC) ------ */
+/* Runs once at boot before any play: H01-H07 + map validity. SFX/rumble/NVS
+   guarded by s_selftest. State restored afterwards. */
+static int s_test_pass = 0, s_test_fail = 0;
+#define TCHECK(name, cond) do { \
+    if (cond) { s_test_pass++; } \
+    else { s_test_fail++; ESP_LOGE(TAG, "selftest FAIL: %s", name); } \
+} while (0)
+
+static void t_body2(cell_t a, cell_t b)
+{
+    s_g.length = 2;
+    s_g.body[0] = a; s_g.body[1] = b;
+}
+static void serpent_core_selftest(void)
+{
+    s_selftest = true;
+    FW = 12; FH = 10;   /* landscape baseline (user may be in portrait) */
+    const sp_level_t *L1 = sp_level(1);
+    const sp_level_t *L4 = sp_level(4);
+    FW = 12; FH = 10;   /* landscape baseline for tests */
+
+    /* H01: reverse/same/queue rules */
+    s_g.dir = s_g.last_applied = DIR_RIGHT; s_g.queue_n = 0;
+    TCHECK("H01-reverse-drop", queue_dir(DIR_LEFT) == false && s_g.queue_n == 0);
+    TCHECK("H01-same-drop", queue_dir(DIR_RIGHT) == false && s_g.queue_n == 0);
+    TCHECK("H01-queue-2", queue_dir(DIR_UP) && queue_dir(DIR_LEFT) && s_g.queue_n == 2);
+    TCHECK("H01-queue-full", queue_dir(DIR_DOWN) == false);
+
+    /* H02: tail-follow legal (no growth) */
+    memset(&s_g, 0, sizeof(s_g));
+    FW = 12; FH = 10;
+    t_body2((cell_t){4, 5}, (cell_t){3, 5});
+    s_g.dir = s_g.last_applied = DIR_LEFT; s_g.queue_n = 0;
+    s_g.food.x = 9; s_g.food.y = 9;
+    rebuild_occ(L1);
+    s_g.alive = true;
+    do_step(0);
+    TCHECK("H02-tail-follow", s_g.alive && s_g.length == 2 &&
+           s_g.body[0].x == 3 && s_g.body[0].y == 5);
+
+    /* H03: eat grows immediately, tail stays (no pending-growth design) */
+    memset(&s_g, 0, sizeof(s_g));
+    t_body2((cell_t){4, 5}, (cell_t){3, 5});
+    s_g.dir = s_g.last_applied = DIR_RIGHT; s_g.queue_n = 0;
+    s_g.food.x = 5; s_g.food.y = 5;
+    rebuild_occ(L1);
+    s_g.occ[5 * FW + 5] = 4;
+    s_g.alive = true;
+    do_step(0);
+    TCHECK("H03-eat-grows-tail-stays", s_g.alive && s_g.length == 3 &&
+           s_g.body[0].x == 5 && s_g.body[2].x == 3);
+
+    /* H04: wrap L1 all 4 edges */
+    {
+        bool ok = true;
+        const int8_t ex[4][4] = {{0,5,DIR_LEFT},{11,5,DIR_RIGHT},{5,0,DIR_UP},{5,9,DIR_DOWN}};
+        for (int e = 0; e < 4 && ok; e++) {
+            memset(&s_g, 0, sizeof(s_g));
+            t_body2((cell_t){ex[e][0], ex[e][1]}, (cell_t){ex[e][0] + (ex[e][2] == DIR_LEFT ? 1 : ex[e][2] == DIR_RIGHT ? -1 : 0), (int8_t)(ex[e][1] + (ex[e][2] == DIR_DOWN ? -1 : ex[e][2] == DIR_UP ? 1 : 0))});
+            s_g.dir = s_g.last_applied = (direction_t)ex[e][2]; s_g.queue_n = 0;
+            s_g.food.x = 6; s_g.food.y = 6;
+            rebuild_occ(L1);
+            s_g.alive = true;
+            do_step(0);
+            ok = ok && s_g.alive;
+        }
+        TCHECK("H04-wrap-4-edges", ok);
+    }
+
+    /* H05: wall L4 all 4 edges die */
+    {
+        bool ok = true;
+        const int8_t ex[4][4] = {{1,5,DIR_LEFT},{10,5,DIR_RIGHT},{5,1,DIR_UP},{5,8,DIR_DOWN}};
+        for (int e = 0; e < 4 && ok; e++) {
+            memset(&s_g, 0, sizeof(s_g));
+            s_g.level = 4;   /* WALLED (wrap off) */
+            t_body2((cell_t){ex[e][0], ex[e][1]}, (cell_t){ex[e][0] + (ex[e][2] == DIR_LEFT ? 1 : ex[e][2] == DIR_RIGHT ? -1 : 0), (int8_t)(ex[e][1] + (ex[e][2] == DIR_DOWN ? -1 : ex[e][2] == DIR_UP ? 1 : 0))});
+            s_g.dir = s_g.last_applied = (direction_t)ex[e][2]; s_g.queue_n = 0;
+            s_g.food.x = 6; s_g.food.y = 6;
+            rebuild_occ(L4);
+            s_g.alive = true;
+            do_step(0);
+            ok = ok && !s_g.alive && s_g.dead_why == DEAD_WALL;
+        }
+        TCHECK("H05-wall-4-edges", ok);
+    }
+
+    /* H06: mine + block death */
+    memset(&s_g, 0, sizeof(s_g));
+    t_body2((cell_t){4, 5}, (cell_t){3, 5});
+    s_g.dir = s_g.last_applied = DIR_RIGHT; s_g.queue_n = 0;
+    s_g.food.x = 9; s_g.food.y = 9;
+    s_g.mines[0].x = 5; s_g.mines[0].y = 5; s_g.mine_count = 1;
+    rebuild_occ(L1);
+    s_g.alive = true;
+    do_step(0);
+    TCHECK("H06-mine-dies", !s_g.alive);
+
+    /* H07: clear trigger (L1 target 6) */
+    memset(&s_g, 0, sizeof(s_g));
+    t_body2((cell_t){4, 5}, (cell_t){3, 5});
+    s_g.dir = s_g.last_applied = DIR_RIGHT; s_g.queue_n = 0;
+    s_g.food.x = 5; s_g.food.y = 5;
+    s_g.food_in_level = L1->food_target - 1;
+    rebuild_occ(L1);
+    s_g.occ[5 * FW + 5] = 4;
+    s_g.alive = true;
+    do_step(0);
+    TCHECK("H07-clear-trigger", s_g.alive && s_g.food_in_level == L1->food_target);
+
+    /* H08: 200 food spawns valid */
+    {
+        bool ok = true;
+        memset(&s_g, 0, sizeof(s_g));
+        t_body2((cell_t){6, 5}, (cell_t){5, 5});
+        s_g.dir = s_g.last_applied = DIR_RIGHT;
+        for (int t = 0; t < 200 && ok; t++) {
+            rebuild_occ(L1);
+            spawn_food(L1);
+            int x = s_g.food.x, y = s_g.food.y;
+            ok = ok && x >= 0 && x < FW && y >= 0 && y < FH;
+            ok = ok && manhattan(x, y, 6, 5) >= 2;
+            ok = ok && bfs_reachable(x, y, L1);
+        }
+        TCHECK("H08-food-200-valid", ok);
+    }
+
+    /* H09: maps landscape (row5 clear, connected, 2x2) */
+    {
+        bool ok = true;
+        for (uint8_t lv = 1; lv <= 10 && ok; lv++) {
+            const sp_level_t *L = sp_level(lv);
+            for (int x = 0; x < 12 && ok; x++)
+                ok = ok && !((L->block_rows[5] >> x) & 1);
+            /* 2x2 free somewhere */
+            bool has2x2 = false;
+            for (int y = 0; y < 9 && !has2x2; y++)
+                for (int x = 0; x < 11 && !has2x2; x++) {
+                    bool f = true;
+                    for (int dy = 0; dy < 2 && f; dy++)
+                        for (int dx = 0; dx < 2 && f; dx++)
+                            if ((L->block_rows[y + dy] >> (x + dx)) & 1) f = false;
+                    if (f) has2x2 = true;
+                }
+            ok = ok && has2x2;
+        }
+        TCHECK("H09-maps-valid", ok);
+    }
+
+    ESP_LOGI(TAG, "selftest done: %d PASS %d FAIL", s_test_pass, s_test_fail);
+    s_selftest = false;
+    memset(&s_g, 0, sizeof(s_g));
+    s_arc = ARC_OFF;
+    field_refresh();
 }
 
 /* ---------------- public ---------------- */
@@ -860,6 +1105,7 @@ void serpent_arcade_init(void)
     nvs_load();
     ESP_LOGI(TAG, "serpent v10 init hi=%lu best=%d rumble=%d",
              (unsigned long)s_hiscore, s_best_level, s_rumble_mode);
+    serpent_core_selftest();   /* on-target logic tests (muted, NVS-safe) */
 }
 bool serpent_arcade_active(void) { return s_arc != ARC_OFF; }
 uint32_t serpent_hiscore(void) { return s_hiscore; }
@@ -905,6 +1151,7 @@ void serpent_arcade_tick(uint32_t now)
 {
     s_tick_now = now;
     matrix_set_dim_pct(s_arc == ARC_PAUSED ? 25 : 100);   /* pause dim */
+    /* no minimum forced: user wants true 1% (TFT mirror stays readable) */
     switch (s_arc) {
     case ARC_MENU:
         if ((int32_t)(now - s_last_render) >= 33) {
@@ -950,6 +1197,7 @@ void serpent_arcade_tick(uint32_t now)
                     uint32_t iv = now - s_last_step_ms;
                     if (iv < s_step_min) s_step_min = iv;
                     if (iv > s_step_max) s_step_max = iv;
+                    s_step_n++;
                 }
                 s_last_step_ms = now;
                 uint8_t fil_before = s_g.food_in_level;
@@ -986,11 +1234,11 @@ void serpent_arcade_tick(uint32_t now)
         if (!s_stats_t0) s_stats_t0 = now;
         if (now - s_stats_t0 >= 60000) {
             s_stats_t0 = now;
-            ESP_LOGI(TAG, "play stats L%d step=%dms min/max=%lu/%lu score=%lu",
-                     s_g.level, s_g.step_ms,
+            ESP_LOGI(TAG, "play stats L%d step=%dms n=%lu min/max=%lu/%lu score=%lu",
+                     s_g.level, s_g.step_ms, (unsigned long)s_step_n,
                      (unsigned long)s_step_min, (unsigned long)s_step_max,
                      (unsigned long)s_g.score);
-            s_step_min = 0xFFFFFFFF; s_step_max = 0;
+            s_step_min = 0xFFFFFFFF; s_step_max = 0; s_step_n = 0;
         }
         break;
     }
@@ -1090,6 +1338,7 @@ void serpent_arcade_get_status(serpent_status_t *out)
     out->fw = matrix_field_w();
     out->fh = matrix_field_h();
     out->winfx = s_g.winfx ? 1 : 0;
+    out->pad_lost = s_pad_lost ? 1 : 0;
     for (int i = 0; i < 120; i++) {
         out->frame_rgb[i][0] = s_mirror[i][0];
         out->frame_rgb[i][1] = s_mirror[i][1];
@@ -1113,11 +1362,30 @@ bool serpent_arcade_route(const xbox360_pad_t *pad, uint16_t dig,
                           uint16_t tap, uint32_t now)
 {
     bool present = pad && pad->present && xbox360_dongle_connected();
+    s_tick_now = now;   /* spawn timestamps valid in transitions too */
+    input_events_update(dig, now);   /* keep ev_* fresh (input_handle skips us) */
     arc_rumble_stop(now);
+    /* P5 heartbeat: proves the loop is alive while arcade runs */
+    {
+        static uint32_t s_hb = 0;
+        if (s_arc != ARC_OFF && (int32_t)(now - s_hb) >= 0) {
+            s_hb = now + 5000;
+            ESP_LOGI(TAG, "arc hb st=%d dig=%04x estop=%d",
+                     (int)s_arc, dig, g.estop);
+        }
+    }
 
     if ((tap & B_GUIDE) && s_arc != ARC_OFF) {
         exit_full(now);
-        return false;
+        return false;   /* car E-STOP path still sees this tap */
+    }
+    /* GUIDE hold 1 s in arcade = pure game exit (no estop change) */
+    {
+        static uint32_t s_gh = 0;
+        if (s_arc != ARC_OFF && (dig & B_GUIDE)) {
+            if (!s_gh) s_gh = now;
+            if (now - s_gh >= 1000) { s_gh = 0; exit_full(now); return false; }
+        } else s_gh = 0;
     }
     /* E-STOP latched elsewhere (Alexa/IMU): leave arcade, motors stay 0 */
     if (g.estop && s_arc != ARC_OFF) {
@@ -1126,8 +1394,6 @@ bool serpent_arcade_route(const xbox360_pad_t *pad, uint16_t dig,
     }
     if (dig & B_BACK) { if (!s_back_t0) s_back_t0 = now; }
     else s_back_t0 = 0;
-    if (dig & B_B) { if (!s_b_t0) s_b_t0 = now; }
-    else s_b_t0 = 0;
 
     if (s_arc == ARC_OFF) {
         if (present && !g.estop && !os_game_active() && os_parked() &&
@@ -1147,9 +1413,11 @@ bool serpent_arcade_route(const xbox360_pad_t *pad, uint16_t dig,
     }
 
     if (!present) {
+        s_pad_lost = true;
         if (s_arc == ARC_PLAY) {
             s_arc = ARC_PAUSED;
             s_state_t0 = now;
+            s_pause_t0 = now;
             led_matrix_set_dim(true);
             rumble_stop_all(now);
             ESP_LOGI(TAG, "pad lost -> paused+dim");
@@ -1158,6 +1426,7 @@ bool serpent_arcade_route(const xbox360_pad_t *pad, uint16_t dig,
             s_last_render = now;
             render_play(now);
         }
+        s_pad_lost = false;   /* pad back */
         return true;
     }
     led_matrix_set_dim(false);
@@ -1245,9 +1514,48 @@ bool serpent_arcade_route(const xbox360_pad_t *pad, uint16_t dig,
         if (has_st) queue_dir(st);
         if (has_dp) queue_dir(dp);
         if (has_dir) queue_dir(fb);
+        /* LT/RT analog brightness: LT = dim (full = 1%), RT = bright
+           (full = 100%). Release = lock. Stronger press wins. */
+        {
+            bool lt = pad->lt > 10, rt = pad->rt > 10;
+            if (lt || rt) {
+                uint8_t b;
+                if (lt && (!rt || pad->lt >= pad->rt))
+                    b = (uint8_t)(100 - (uint16_t)pad->lt * 99u / 255u);
+                else
+                    b = (uint8_t)(1 + (uint16_t)pad->rt * 99u / 255u);
+                if (b < 1) b = 1;
+                if (b != car_get_rgb_bright()) {
+                    car_set_rgb_bright(b);
+                    s_br_dirty = true;
+                }
+            }
+            /* lock blip on release */
+            {
+                static bool was_trig = false;
+                bool now_trig = (pad->lt > 10 || pad->rt > 10);
+                if (was_trig && !now_trig) car_sfx_blip(1200);
+                was_trig = now_trig;
+            }
+        }
+        /* LB/RB = matrix brightness 1..100%, 10% per click (live+saved) */
+        if (tap & B_LB) {
+            uint8_t b = car_get_rgb_bright();
+            b = b <= 11 ? 1 : (uint8_t)(b - 10);
+            car_set_rgb_bright(b);
+            s_br_dirty = true;
+            car_sfx_blip(700);
+        } else if (tap & B_RB) {
+            uint8_t b = car_get_rgb_bright();
+            b = b >= 91 ? 100 : (uint8_t)(b + 10);
+            car_set_rgb_bright(b);
+            s_br_dirty = true;
+            car_sfx_blip(900);
+        }
         if (tap & B_START) {
             s_arc = ARC_PAUSED;
             s_state_t0 = now;
+            s_pause_t0 = now;   /* bonus timer freezes here */
             rumble_stop_all(now);
             ESP_LOGI(TAG, "paused");
         } else if (back_hold) {
@@ -1258,9 +1566,40 @@ bool serpent_arcade_route(const xbox360_pad_t *pad, uint16_t dig,
     }
 
     case ARC_PAUSED:
-        if (tap & B_START) {
+        {
+            bool lt = pad->lt > 10, rt = pad->rt > 10;
+            if (lt || rt) {
+                uint8_t b;
+                if (lt && (!rt || pad->lt >= pad->rt))
+                    b = (uint8_t)(100 - (uint16_t)pad->lt * 99u / 255u);
+                else
+                    b = (uint8_t)(1 + (uint16_t)pad->rt * 99u / 255u);
+                if (b < 1) b = 1;
+                if (b != car_get_rgb_bright()) {
+                    car_set_rgb_bright(b);
+                    s_br_dirty = true;
+                }
+            }
+        }
+        if (tap & B_LB) {
+            uint8_t b = car_get_rgb_bright();
+            b = b <= 11 ? 1 : (uint8_t)(b - 10);
+            car_set_rgb_bright(b);
+            s_br_dirty = true;
+            car_sfx_blip(700);
+        } else if (tap & B_RB) {
+            uint8_t b = car_get_rgb_bright();
+            b = b >= 91 ? 100 : (uint8_t)(b + 10);
+            car_set_rgb_bright(b);
+            s_br_dirty = true;
+            car_sfx_blip(900);
+        } else if (tap & B_START) {
             s_arc = ARC_PLAY;
             s_g.last_tick = now;   /* timers freeze: no dt jump */
+            if (s_g.bonus_on && s_pause_t0) {
+                s_g.bonus_until += now - s_pause_t0;   /* unfreeze bonus */
+                s_pause_t0 = 0;
+            }
             ESP_LOGI(TAG, "resumed");
         } else if (tap & B_BACK) {
             s_back_t0 = 0;

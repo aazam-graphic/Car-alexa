@@ -58,6 +58,8 @@ void matrix_show(void);              /* brightness-scaled push, max ~30 FPS call
 /* brightness 0..72 (cap enforced). default 50 */
 void matrix_set_brightness(uint8_t b);
 uint8_t matrix_get_brightness(void);
+/* percent 1..100 mapped onto the cap (100% = full cap) */
+void matrix_set_brightness_pct(uint8_t pct);
 
 /* orientation: LANDSCAPE 12x10, PORTRAIT 10x12 (vertical strip).
    Portrait = exact transpose remap, zero crop, all 120 LEDs. */
@@ -90,11 +92,12 @@ matrix_owner_t led_matrix_owner(void);
 uint16_t matrix_estimate_ma(void);
 /* extra dim multiplier % (pause = 25). 100 = off. */
 void matrix_set_dim_pct(uint8_t pct);
+/* short goodbye flash after arcade exit (visible even if idle == OFF) */
+void led_matrix_exit_flash(void);
 
 /* ---- Phase-B mapping diagnostics (STEP 4) ---- */
 void matrix_test_border(void);       /* rectangular border -> zig-zag check */
 void matrix_test_diagonal(void);     /* (0,0)->(9,9) diagonal */
-void matrix_test_pixel_walk(uint32_t now_ms);  /* ek pixel order me, (0,0) top-left verify */
 void matrix_test_rgb5(void);         /* Phase-A: pehle 5 LEDs R/G/B @20 */
 
 /* demo tick: boot self-test + idle border sweep. car_task se har loop call karo.

@@ -52,6 +52,7 @@ typedef struct {
     uint8_t  best_level, lives;
     uint8_t  fw, fh;                 /* matrix field (12x10 / 10x12) */
     uint8_t  winfx;                  /* WIN_BOARD wipe active */
+    uint8_t  pad_lost;               /* controller disconnected mid-arcade */
     uint8_t  frame_rgb[120][3];   /* logical index order */
     uint32_t mirror_dirty[4];     /* 120-bit, reader clears after redraw */
 } serpent_status_t;

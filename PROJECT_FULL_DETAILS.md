@@ -1,8 +1,7 @@
 # AZAM CAR OS + 120-LED MATRIX ARCADE — Full Project Details
 
-> **Last updated: 4 Oct 2026 — source code se verified** (`main/*.c/h`, `partitions.csv`, build log).
-> Purani docs (`PROJECT_DETAILS.md` = 17 Sep 2026, `SESSION_SUMMARY.md`, `PROJECT_ANALYSIS_AND_BUGS.md`)
-> ab outdated hain — pins aur features neeche wale latest hain.
+> **Last updated: 5 Oct 2026 — source code se verified** (`main/*.c/h`, build log, hardware play-test).
+> Alexa Oct 2026 me fully remove ho gayi (bridge/task/UI/deps). WiFi/SNTP raha (table clock).
 
 **Project:** Xbox 360 wireless (Redgear Pro dongle) se chalne wala Robot Car + "Car OS" Dashboard + 120-LED RGB Matrix Arcade
 **MCU:** ESP32-S3 N16R8 (16 MB Flash, 8 MB Octal PSRAM, dual-core 240 MHz) | **Framework:** ESP-IDF v5.5.5 (build-tested) / v6.0.2 (original)
@@ -118,19 +117,19 @@ D-pad/stick navigate (repeat 350 ms/120 ms), **A** confirm/apply, **B** back/can
 ### 4.3 TFT Games (NEON CONVOY `cargame_neon_convoy.c`, NEON SERPENT `cargame_neon_serpent.c`)
 Stick+buttons game actions, START pause (release resume), BACK/B exit hub, motors parked.
 
-### 4.4 Matrix Arcade — NEON SERPENT (`main/game_serpent.c`)
-**Entry:** parked (STANDBY/HOME, drive me NAHI) + pad paired + estop clear → **BACK hold 1 s** → MENU (TFT toast `ARCADE: NEON SERPENT`).
+### 4.4 Matrix Arcade — NEON SERPENT 10-LEVEL (`main/game_serpent.c`, `serpent_levels.h`)
+**Entry:** HOME **SNAKE tile + A**, ya Games Hub **MATRIX SNAKE tile + A**, ya parked me **BACK hold 1 s** → MENU (TFT toast + companion screen).
 | Button | Kaam |
 |--------|------|
-| X / Y / B / A | Left / Up / Right / Down (face-button directions) |
-| START | Menu start / pause-resume / game-over restart |
-| BACK tap / hold | Menu wapas / arcade se bahar |
-| LB tap / LT pull | Dash burst (3 s cooldown) |
-| RB hold | Speed boost |
-| GUIDE | Foran bahar + matrix clear (E-STOP car wala chalta hai) |
-| Disconnect | Pause + matrix 10% dim + red border pulse |
+| X / Y / B / A | Left / Up / Right / Down — sirf PLAY me (D-pad + left stick bhi chalte hain) |
+| START | Menu start / pause-resume / game-over retry |
+| BACK tap / hold | Menu wapas / arcade se bahar (exit flash) |
+| LB / RB (MENU) | Rumble mode − / + (OFF/SOFT/FULL) |
+| D-pad / stick (MENU) | Start level select (unlocked tak) |
+| GUIDE tap / hold | Bahar + E-STOP path / bahar bina E-STOP |
+| Disconnect | Pause + 10% dim + red border pulse |
 
-Rules: full 12×10 field (border nahi), Nokia wrap (kinare se niklo = doosri taraf), steady **red food** (+1), static **purple mines** (max 3, har 5 food par +1, tez raftaar), **gold bonus circle 2×2** har 4 food par (3 s me khao = **+5**, der = +2, 7 s me gayab), green gradient snake + lime head, game-over red flash + score bar + hiscore rainbow wave (NVS `arcade/serp_hi`).
+Rules: **10 levels** (speed 320→120 ms, wrap L1-6, wall L7-10 per table B+, endless `max(100, 120-20×food/5)`), **3 lives** (DYING → RETRY digits+lives dots → INTRO), scoring food 10×L / bonus 50×L fast, 20×L slow / clear 50×L (+500×L board-full), steady **red food**, static **purple mines** + patrol (L8 row 2, L10 row 1), **gold bonus 2×2** (7 s), green snake + lime head, direction queue-2 + anti-reverse + arming rule, accumulator timing, TFT companion (mirror + score/level/food/lives/rumble), hiscore `serp_hi2` (level-1 runs only) + practice mode.
 
 ### 4.5 Input Event Engine (`main/input_events.c/h`)
 TAP 350 ms / HOLD 700-2000 ms / REPEAT 350+120 ms / DOUBLE-TAP / CHORD — tap-hold exclusive, consumable, context-switch flush (`input_flush_context_switch`, GUIDE excluded).
@@ -143,15 +142,16 @@ TAP 350 ms / HOLD 700-2000 ms / REPEAT 350+120 ms / DOUBLE-TAP / CHORD — tap-h
 |---|---|
 | BOOT | AZAM CAR OS logo anim + checklist CONTROL/SENSORS/DISPLAY/PAD |
 | **STANDBY (TABLE CLOCK)** | Cream card, giant 7-seg HH:MM:SS + AM/PM, date top, weekday + numeric date, seconds line, `PRESS START`; sync se pehle `--:--`; SNTP lock par `TIME SYNCED - IST` toast 1.5 s (`net_wifi.c` IST-5:30) |
-| HOME (3×2, 2 pages RB) | P0: DRIVE RADAR ROOF VOICE TRIP SETTINGS GAMES DIAG NOTIFY; P1: OLED GRAPHS SCORE LINK VLOG … CLOCK (park clock tile) |
-| DRIVE (cockpit 4 views) | Speed hero digits, L/F/R cards (cyan/amber/red), gear pills G1–G5, 6 status icons; BACK tap = view (FULL/COMPACT/SENSOR/NIGHT), BACK hold = theme (NIGHT/SOLAR/SUN) (`ui_drive_cockpit.c`) |
-| ANALYTICS | 480-sample PSRAM graphs speed/front/yaw |
+| HOME (9 + 5 tiles, RB page) | P0: DRIVE SNAKE SETTINGS GAMES DIAG RADAR ROOF TRIP NOTIFY; P1: OLED GRAPHS SCORE LINK CLOCK (VLOG/empties removed Oct 2026) |
+| DRIVE (cockpit 4 views, 10 FPS redraw) | Speed hero digits, L/F/R cards (cyan/amber/red), gear pills G1–G5, 6 status icons; BACK tap = view (FULL/COMPACT/SENSOR/NIGHT), BACK hold = theme (NIGHT/SOLAR/SUN) (`ui_drive_cockpit.c`) |
+| ANALYTICS (10 FPS) | 480-sample PSRAM graphs speed/front/yaw |
 | OLED CTRL | Layout MINI HUD/RADAR/STATUS/TEXT + 2× preview |
-| SETTINGS (14) | SPEED CAP, ENGINE VOL, OBST DIST, LED BRIGHT, GEAR 1–5, OLED LAYOUT, HUD LAYOUT, MIST MAX, TFT BRIGHT, SAVE — A apply, START NVS save, B discard |
-| GAMES HUB | 2 TFT games + hiscore |
-| DIAG (5 tabs) | SYS (heap/PSRAM/uptime) / SENS / CTRL / DISPLAY (FPS/push/dirty) / THEME + Restart/Factory Reset (A 1.5 s) |
-| ALEXA LOG / NOTIF / SCORE / TRIP / CONN | Voice history, 24-entry feed (Alexa/Safety/Rules/Sound/MPU), drive grade, odometer, WiFi/MQTT |
-| Quick overlay (START hold) | HEAD/HAZ/ROOF/MUTE chips + BRIGHT/VOL/THEME/PROFILE |
+| SETTINGS (19) | SPEED CAP, ENGINE VOL, OBST DIST, LED BRIGHT, GEAR 1–5, OLED LAYOUT, HUD LAYOUT, MIST MAX, TFT BRIGHT, RUMBLE (OFF/SOFT/FULL), RGB BRIGHT (10-72 live), MATRIX ORIENT (LANDSCAPE/PORTRAIT live), IDLE SHOW (FALAK/SWEEP/OFF live), GAME FX (FULL/MINIMAL), SAVE — A apply, START NVS save, B discard |
+| GAMES HUB | 3 games: 2 TFT + MATRIX SNAKE tile (matrix launch, exit → hub) |
+| MATRIX companion (arcade active) | Live mirror + score/level/food/lives/rumble/mode/bonus + hints; full-push only (partial corrupts panel), PLAY 10 FPS |
+| DIAG (5 tabs, 2 FPS) | SYS (heap/PSRAM/uptime) / SENS / CTRL / DISPLAY (FPS/push/dirty) / THEME + Restart/Factory Reset (A 1.5 s) |
+| NOTIF / SCORE / TRIP / CONN | 24-entry feed (Safety/Rules/Sound/MPU), drive grade, odometer (trip-based), WiFi/time status |
+| Quick overlay (START hold) | HEAD/HAZ/ROOF/MUTE chips + BRIGHT/VOLUME/THEME sliders (PROFILE removed with Alexa) |
 | DRIVE_ARMING | 1.3 s anim + sticks neutral 250 ms gate |
 
 ---
@@ -160,27 +160,26 @@ TAP 350 ms / HOLD 700-2000 ms / REPEAT 350+120 ms / DOUBLE-TAP / CHORD — tap-h
 
 | File | Kaam + key functions |
 |---|---|
-| `main.c` | `app_main()` — 4 tasks create |
+| `main.c` | `app_main()` — 3 tasks create (usb_host, xbox360, car). Alexa task Oct 2026 me removed |
 | `xbox360.c/h` | USB Host driver; `xbox360_pad(slot)`, `xbox360_rumble(slot,l,r)`, `xbox360_dongle_connected()`, LED ring, alive-timestamp |
-| `car.c/h` | Control loop `car_task()`; `input_handle`, `manual_logic`, `auto_logic` (CRUISE→SEARCH), `drive_output`, `strip_update`, `audio_render/effect_update`, `hw_init`, `pin_conflict_check`; settings `car_get/set_setting`, `car_get/set_gear_cap`, `car_settings_save/factory_reset`, `car_system_restart`, `car_speed_cap_pct`, `car_cycle_gear`; trip `trip_*`; SFX `car_sfx_click/score/bad/blip`, `car_snd_play_pcm`, TTS `car_audio_*`; OLED wrappers `osd_*`; `car_roof_apply_saved`, `car_drive_locked`, `car_last_dig`, `car_get_yaw`, `car_us_front_ok` |
-| `car_os.c/h` | `os_init/handle_input/update/draw_tft/draw_oled`, `os_context/parked/game_active`, `os_alert`, `os_request_screen`, `os_win_push/pop`, `os_thumb_*`, `os_hist_*`, `os_perf`, `alexa_os_ctx`, state names/hints, ambient palette |
-| `os_screens_tft.c` + `os_gfx/os_widgets/os_assets/ns_theme` | Sab screen renderers + standby clock + dirty-rect/frame pacing |
-| `tft_display.c/h` + `tft_boot_anim.c` | SPI DMA driver, framebuffer push, brightness, boot anim |
-| `os_oled.c` + `oled_driver.h` | OLED HUD 4 layouts |
-| `roof_light.c/h` | WS2812 roof (GPIO18) — **YIELDED** (`LED_MATRIX_TAKEOVER_ROOF=1` par init/update no-op); 8 modes, NVS persist |
-| **`led_matrix.c/h`** (NEW Oct 2026) | 120-LED driver: `led_matrix_init/deinit/ready/is_active`, `matrix_xy_to_index` (serpentine), `matrix_set_xy[/_rgb]/clear/show`, `matrix_set/get_brightness` (cap 72), `led_matrix_safe_off/set_dim/set_demo`, diagnostics `matrix_test_rgb5/border/diagonal/pixel_walk`, `led_matrix_tick` (boot self-test → falak show) |
-| **`game_serpent.c/h`** (NEW) | Matrix arcade: `serpent_arcade_init/active/route` (entry/exit/menu/countdown/play/pause/over, hiscore NVS) |
-| **`falak_show.c/h`** (NEW) | Idle show `falak_tick`: 6 s beating heart (gradient+pink top+sparkles+ECG) / 6 s gold FALAK marquee 5×7 + centre-hold |
-| `input_events.c/h` | `input_events_update`, `ev_press/release/hold/tap/double/repeat/held`, `input_pressed/consume/flush_context_switch` |
+| `car.c/h` | Control loop `car_task()` (arcade me fixed 20 ms `vTaskDelayUntil`, P5 loop stats); `input_handle`, `manual_logic`, `auto_logic` (CRUISE→SEARCH), `drive_output`, `strip_update`, `audio_render/effect_update`, `hw_init`, `pin_conflict_check`; settings `car_get/set_setting`, gear caps, `car_settings_save/factory_reset`, `car_system_restart`, display/matrix settings get/set + `car_display_apply_saved`; trip `trip_*`; SFX `car_sfx_*`, `car_snd_play_pcm`, TTS; OLED wrappers `osd_*`; `car_roof_apply_saved`, `car_drive_locked`, `car_get_yaw`, `car_us_front_ok` |
+| `car_os.c/h` | `os_init/handle_input/update/draw_tft/draw_oled`, `os_context/parked/game_active`, `os_alert`, `os_request_screen`, `os_win_push/pop`, `os_hist_*`, `os_perf`, `car_os_ctx`, state names/hints; TFT screens 10/2 FPS throttled (lag fix Oct 2026) |
+| `os_screens_tft.c` + `os_gfx/os_widgets/os_assets/ns_theme` | Sab screen renderers + standby clock + companion + dirty-skip (full pushes; partial corrupts panel) |
+| `tft_display.c/h` + `tft_boot_anim.c` | SPI DMA driver, framebuffer push, brightness, `tft_set_flip` (baseline assert), boot anim |
+| `os_oled.c` + `oled_driver.h` | OLED HUD 4 layouts (arcade PLAY states me suppressed) |
+| `roof_light.c/h` | WS2812 roof (GPIO18) — **YIELDED** (matrix takeover); 8 modes, NVS persist |
+| **`led_matrix.c/h`** | 120-LED driver 12×10 + 10×12 portrait transpose (`matrix_xy_to_index[_portrait]`, `matrix_field_w/h`); `matrix_set_orient` (LANDSCAPE/PORTRAIT), `matrix_set_idle` (FALAK/SWEEP/OFF), owner acquire/release, 1500 mA limiter, pause dim, exit flash, boot self-test 3 s |
+| **`game_serpent.c/h` + `serpent_levels.h`** | 10-level arcade: `route` (input) + `tick` (logic/render), queue-2, accumulator, BFS spawns, patrol, 3 lives, RETRY/CLEAR/WIN_BOARD, rumble queue + OFF/SOFT/FULL, `serp_hi2`/practice/`serp_lvl`, status snapshot + mirror, hub stubs, `serpent_arcade_open/hiscore` |
+| **`falak_show.c/h`** | Idle show `falak_tick` (field-size aware heart + marquee) |
+| `input_events.c/h` | semantic events + `input_flush_context_switch` (arcade entry/exit par bhi) |
 | `imu_adv.c/h` + `imu_driver.c` | 100 Hz pipeline: `imu_adv_init/ready/slow_update/set_motion`, `heading_rel`, `evt_recv`, `snapshot`, `motors_cut`, `rollover_latched/ack`, `corner_cap`, `airborne`, `drive_score`, `trip_hard_bumps` |
 | `ui_drive_cockpit.c/h` + `ui_motion_radar.c` | `ui_cockpit_draw/next_view/next_theme`, battery %, dim-rect; radar UI |
 | `mic_in.c/h` | `mic_init/ready/poll`, `mic_rms/vu/peak/beat/clap`, 3 s `mic_listen_*` (SCK13/WS14/SD48) |
 | `snd_bank.c/h` + `img_bank.c/h` | SPIFFS→PSRAM LRU: `snd_play[/_vol]`, `snd_bank_init/prefetch/preload_all`; `img_get/init`, `img_blit[/_half/_full]` |
 | `notif.c/h` | `notif_init/push/list`, 24-entry ring 5 categories |
 | `mem_diag.c/h` | `mem_diag_init/start_timer/tick` (heap/PSRAM/stack, 10 s) |
-| `net_wifi.c/h` | `net_wifi_start/get_state/up/time_synced` (station + SNTP IST) |
-| `alexa_bridge.c/h` | `alexa_task`, MQTT/TLS shadow, TTL+safety gateway, `alexa_apply_pending`, confirm dialog, banner, `os_scr_alexa_log`, impact/announce/odo/profile |
-| `car_games.c/h` + `cargame_*` | TFT games registry `car_games_all_init`, Convoy `ncr_*`, Serpent `g7_*` |
+| `net_wifi.c/h` | `net_wifi_start/get_state/up/time_synced` (station + SNTP IST; Alexa gayi, clock raha) |
+| `car_games.c/h` + `cargame_*` | TFT games registry (3: Convoy, Serpent-g7, Matrix stub) + hub |
 
 ---
 
@@ -203,5 +202,8 @@ idf.py -p COM4 monitor
 Verify: `pin check: 29 functions, no GPIO conflicts`, `matrix init OK: 12x10=120`, `serpent arcade init`, no panic.
 
 ## 10. NVS Keys
-`car_set`: spd/vol/obs/led/tftb/mist/gears/roof_m/roof_b/roof_c (+VER) · `net`: wifi_ssid/wifi_pass · `arcade`: serp_hi.
-⚠ WiFi/AWS creds source me embedded — public repo se pehle rotate karo.
+`car_set`: spd/vol/obs/led/tftb/mist/gears/roof_m/roof_b/roof_c/mx_rgb/mx_ori/mx_idle/mx_fx (+VER=5) · `net`: wifi_ssid/wifi_pass · `arcade`: serp_hi2/serp_lvl/rumble.
+⚠ WiFi creds source me embedded — public repo se pehle rotate karo.
+
+## 11. P5 Numbers (measured, Oct 2026)
+Arcade loop: min 15 / avg 20 / max 25 ms (fixed 20 ms pacing, FreeRTOS 100 Hz tick granularity) · OLED calls in PLAY = 0 · Steps L1 315/325 ms (target 320) · Dead files 12 + alexa_bridge/config (68 KB src) + mqtt/cjson deps removed · App flash ~1.5 MB @460800.

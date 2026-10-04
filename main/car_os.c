@@ -6,7 +6,6 @@
 #include "car_os.h"
 #include "car_games.h"
 #include "os_screens_tft.h"
-#include "os_oled.h"
 #include "os_assets.h"
 #include "input_events.h"
 #include "tft_display.h"
@@ -100,7 +99,6 @@ static bool is_menu_state(os_state_t st)
     case OS_DRIVE_ANALYTICS:
     case OS_DIAG:
     case OS_SETTINGS:
-    case OS_OLED_CTRL:
     case OS_GAMES_HUB:
     case OS_SCORE:
     case OS_TRIP:
@@ -233,22 +231,22 @@ static const os_state_t s_tile_state_p0[9] = {
     OS_GAMES_HUB,  OS_DIAG,       OS_DRIVE_MAIN,   /* Games Diag Radar */
     OS_DRIVE_MAIN, OS_TRIP,       OS_NOTIF,        /* Roof Trip Notify */
 };
-static const os_state_t s_tile_state_p1[5] = {
-    OS_OLED_CTRL, OS_DRIVE_ANALYTICS, OS_SCORE,
-    OS_CONN,      OS_STANDBY,         /* 4 = PARK clock */
+static const os_state_t s_tile_state_p1[4] = {
+    OS_DRIVE_ANALYTICS, OS_SCORE,
+    OS_CONN,            OS_STANDBY,   /* 3 = PARK clock */
 };
 
 static const char *s_names[] = {
     "BOOT", "HOME", "DRIVE", "ANALYTICS", "DIAG", "SETTINGS",
-    "OLED CTRL", "GAMES", "LANE RUNNER", "NEON SERPENT", "REFLEX", "MEMORY", "SENSOR",
+    "GAMES", "LANE RUNNER", "NEON SERPENT", "REFLEX", "MEMORY", "SENSOR",
     "REDLINE OPS",
     "SCORE", "TRIP", "CONNECT", "NOTIFY", "STANDBY", "ARMING"
 };
 static const char *s_hints[] = {
     "", "A:OPEN B:CLOCK RB:PAGE", "A/B:MENU RS:GEAR", "B:MENU", "L/R:TAB A/B:MENU",
-    "UP/DN:SEL A:APPLY B:BACK ST:SAVE X:JUMP", "UP/DN:LAYOUT A:APPLY B:MENU",
+    "UP/DN:SEL A:APPLY B:BACK ST:SAVE X:JUMP",
     "UP/DN:SEL A:PLAY B:MENU", "B:EXIT", "B:EXIT", "B:EXIT", "B:EXIT", "B:EXIT",
-    "B:EXIT", "B:BACK",
+    "B:EXIT",
     "B:BACK", "A:RESET B:BACK", "B:BACK", "UP/DN:SCROLL B:BACK", "START:MENU", "WAIT..."
 };
 
@@ -309,12 +307,9 @@ void os_init(os_ctx_t *ctx)
     ctx->prev_state = OS_BOOT;
     ctx->state_enter_ms = os_now();
     ctx->home_sel = 0;
-    ctx->oled_sel = 0;
     ctx->game_sel = 0;
     ctx->settings_sel = 0;
     ctx->diag_tab = 0;
-    ctx->oled_layout = 0;
-    snprintf(ctx->oled_text, sizeof(ctx->oled_text), "CAR OS READY");
     ctx->drive_sub_view = 0;    /* VIEW 1 COCKPIT default (1.md 3.4) */
     ctx->cockpit_theme = 1;     /* SOLAR LIGHT default outdoor (1.md 3.5) */
 
@@ -371,7 +366,6 @@ static void settings_draft_load(os_ctx_t *ctx)
     ctx->draft.mist_max    = car_get_setting(4);
     ctx->draft.tft_bright  = car_get_setting(5);
     for (int i = 0; i < 5; i++) ctx->draft.gear_caps[i] = car_get_gear_cap(i);
-    ctx->draft.oled_layout = ctx->oled_layout;
     ctx->draft.hud_layout  = ctx->hud_layout;
     ctx->draft.rumble_mode = serpent_rumble_mode();
     ctx->draft.rgb_bright  = car_get_rgb_bright();
@@ -391,7 +385,6 @@ static bool settings_dirty_check(const os_ctx_t *ctx)
     if (car_get_setting(5) != ctx->draft.tft_bright)  return true;
     for (int i = 0; i < 5; i++)
         if (car_get_gear_cap(i) != ctx->draft.gear_caps[i]) return true;
-    if (ctx->oled_layout != ctx->draft.oled_layout)   return true;
     if (ctx->hud_layout  != ctx->draft.hud_layout)    return true;
     if (serpent_rumble_mode() != ctx->draft.rumble_mode) return true;
     if (car_get_rgb_bright() != ctx->draft.rgb_bright) return true;
@@ -414,38 +407,35 @@ static void settings_adjust(os_ctx_t *ctx, int dir)
     case 4: case 5: case 6: case 7: case 8:
         d->gear_caps[i - 4] = (uint8_t)clampi(d->gear_caps[i - 4] + dir * 5, 10, 100);
         break;
-    case 9:
-        d->oled_layout = (uint8_t)((d->oled_layout + 4 + (dir != 0 ? dir : 1)) % 4);
-        break;
-    case 10:                                /* HUD layout (guide 11 Display) */
+    case 9:                                 /* HUD layout (guide 11 Display) */
         d->hud_layout = (uint8_t)((d->hud_layout + 3 + (dir != 0 ? dir : 1)) % 3);
         break;
-    case 11:                                /* mist max run x10s, 0 = unlim */
+    case 10:                                /* mist max run x10s, 0 = unlim */
         d->mist_max = (uint8_t)clampi(d->mist_max + dir, 0, 12);
         break;
-    case 12:                                /* TFT backlight % - LIVE apply */
+    case 11:                                /* TFT backlight % - LIVE apply */
         d->tft_bright = (uint8_t)clampi(d->tft_bright + dir * 5, 0, 100);
         car_set_setting(5, d->tft_bright);   /* instant hardware effect */
         break;
-    case 13:                                /* rumble mode OFF/SOFT/FULL */
+    case 12:                                /* rumble mode OFF/SOFT/FULL */
         d->rumble_mode = (uint8_t)((d->rumble_mode + 3 + (dir != 0 ? dir : 1)) % 3);
         break;
-    case 14:                                /* matrix RGB brightness - LIVE */
-        d->rgb_bright = (uint8_t)clampi(d->rgb_bright + dir * 2, 10, 72);
+    case 13:                                /* matrix RGB brightness % - LIVE */
+        d->rgb_bright = (uint8_t)clampi(d->rgb_bright + dir * 10, 1, 100);
         car_set_rgb_bright(d->rgb_bright);
         break;
-    case 15:                                /* matrix orientation LANDSCAPE/PORTRAIT - LIVE */
+    case 14:                                /* matrix orientation LANDSCAPE/PORTRAIT - LIVE */
         d->matrix_orient = (uint8_t)((d->matrix_orient + 2 + (dir != 0 ? dir : 1)) % 2);
         car_set_mx_ori(d->matrix_orient);
         break;
-    case 16:                                /* idle show - LIVE */
+    case 15:                                /* idle show - LIVE */
         d->idle_show = (uint8_t)((d->idle_show + 3 + (dir != 0 ? dir : 1)) % 3);
         car_set_mx_idle(d->idle_show);
         break;
-    case 17:                                /* game fx */
+    case 16:                                /* game fx */
         d->game_fx = (uint8_t)((d->game_fx + 2 + (dir != 0 ? dir : 1)) % 2);
         break;
-    default: break;   /* 18 = SAVE handled on A/START */
+    default: break;   /* 17 = SAVE handled on A/START */
     }
     ctx->settings_dirty = settings_dirty_check(ctx);
 }
@@ -461,15 +451,14 @@ static void settings_apply_item(os_ctx_t *ctx, uint8_t i)
     case 4: case 5: case 6: case 7: case 8:
         car_set_gear_cap(i - 4, ctx->draft.gear_caps[i - 4]);
         break;
-    case 9: ctx->oled_layout = ctx->draft.oled_layout; break;
-    case 10: ctx->hud_layout = ctx->draft.hud_layout; break;
-    case 11: car_set_setting(4, ctx->draft.mist_max); break;
-    case 12: car_set_setting(5, ctx->draft.tft_bright); break;
-    case 13: serpent_set_rumble_mode(ctx->draft.rumble_mode); break;
-    case 14: car_set_rgb_bright(ctx->draft.rgb_bright); break;
-    case 15: car_set_mx_ori(ctx->draft.matrix_orient); break;
-    case 16: car_set_mx_idle(ctx->draft.idle_show); break;
-    case 17: car_set_mx_fx(ctx->draft.game_fx); break;
+    case 9: ctx->hud_layout = ctx->draft.hud_layout; break;
+    case 10: car_set_setting(4, ctx->draft.mist_max); break;
+    case 11: car_set_setting(5, ctx->draft.tft_bright); break;
+    case 12: serpent_set_rumble_mode(ctx->draft.rumble_mode); break;
+    case 13: car_set_rgb_bright(ctx->draft.rgb_bright); break;
+    case 14: car_set_mx_ori(ctx->draft.matrix_orient); break;
+    case 15: car_set_mx_idle(ctx->draft.idle_show); break;
+    case 16: car_set_mx_fx(ctx->draft.game_fx); break;
     }
     ctx->settings_dirty = settings_dirty_check(ctx);
 }
@@ -482,7 +471,6 @@ static void settings_save_all(os_ctx_t *ctx)
     car_set_setting(2, ctx->draft.obstacle_cm);
     car_set_setting(3, ctx->draft.led_bright);
     for (int i = 0; i < 5; i++) car_set_gear_cap(i, ctx->draft.gear_caps[i]);
-    ctx->oled_layout = ctx->draft.oled_layout;
     ctx->hud_layout  = ctx->draft.hud_layout;
     car_set_setting(4, ctx->draft.mist_max);
     car_set_setting(5, ctx->draft.tft_bright);
@@ -748,8 +736,8 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
         break;
     }
 
-    case OS_HOME: {                    /* PART 10: widget cards, p0=9 p1=5 */
-        uint8_t ntiles = ctx->home_page ? 5 : 9;
+    case OS_HOME: {                    /* PART 10: widget cards, p0=9 p1=4 */
+        uint8_t ntiles = ctx->home_page ? 4 : 9;
         uint8_t row = ctx->home_sel / 3, col = ctx->home_sel % 3;
         if (tap & B_DUP)    { row = (row + 2) % 3; ctx->home_sel = row * 3 + col; car_sfx_blip(900); snd_play("ui_nav"); }
         if (tap & B_DDOWN)  { row = (row + 1) % 3; ctx->home_sel = row * 3 + col; car_sfx_blip(900); snd_play("ui_nav"); }
@@ -1070,7 +1058,7 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
             if (tap & B_DUP)   { ctx->jump_sel = (uint8_t)((ctx->jump_sel + 6) % 7); car_sfx_blip(900); }
             if (tap & B_DDOWN) { ctx->jump_sel = (uint8_t)((ctx->jump_sel + 1) % 7); car_sfx_blip(900); }
             if (tap & B_A) {
-                static const uint8_t first[7] = { 0, 1, 2, 3, 4, 9, 10 };
+                static const uint8_t first[7] = { 0, 1, 2, 3, 4, 9, 12 };
                 ctx->settings_sel = first[ctx->jump_sel];
                 ctx->settings_jump = false;
                 car_sfx_click();
@@ -1132,22 +1120,6 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
                 go(ctx, OS_HOME, now);
             }
         }
-        break;
-
-    case OS_OLED_CTRL:                 /* persistent oled_sel (guide 2.2) */
-        if (tap & B_DUP)   ctx->oled_sel = (ctx->oled_sel + 3) % 4;
-        if (tap & B_DDOWN) ctx->oled_sel = (ctx->oled_sel + 1) % 4;
-        if ((tap & (B_DLEFT | B_DRIGHT)) && ctx->oled_sel == 3) {
-            static const char *presets[] = { "CAR OS READY", "AZAM ROBOT", "HELLO WORLD", "JAI HIND" };
-            static uint8_t pi = 0;
-            pi = (uint8_t)((pi + 1) % 4);
-            snprintf(ctx->oled_text, sizeof(ctx->oled_text), "%s", presets[pi]);
-        }
-        if (tap & B_A) {
-            ctx->oled_layout = ctx->oled_sel;
-            car_sfx_click();
-        }
-        if (tap & B_B) go(ctx, OS_HOME, now);
         break;
 
     case OS_SCORE:                     /* PART 10 Drive Score window */
@@ -1358,10 +1330,14 @@ void os_update(os_ctx_t *ctx, uint32_t now)
 void os_draw_tft(os_ctx_t *ctx, uint32_t now)
 {
     if (!gfx_fb()) return;
-    /* P4: matrix arcade owns the TFT while active (companion screen) */
+    /* P4: matrix arcade owns the TFT while active (companion screen).
+       FULL pushes only: partial-region pushes corrupt this ST7789 panel. */
     if (serpent_arcade_active()) {
         os_scr_matrix_snake(ctx, now);
-        gfx_push_dirty();
+        if (ui_has_dirty()) {
+            gfx_push();
+            ui_clear_dirty();
+        }
         return;
     }
     if (os_game_active()) return;              /* game drew itself */
@@ -1437,7 +1413,6 @@ void os_draw_tft(os_ctx_t *ctx, uint32_t now)
     case OS_DRIVE_ANALYTICS: ui_mark_dirty(0, 22, 320, 198); os_scr_analytics(ctx, now); break;
     case OS_DIAG:            ui_mark_dirty(0, 22, 320, 198); os_scr_diag(ctx, now); break;
     case OS_SETTINGS:        ui_mark_dirty(0, 22, 320, 198); os_scr_settings(ctx, now); break;
-    case OS_OLED_CTRL:       ui_mark_dirty(0, 22, 320, 198); os_scr_oledctrl(ctx, now); break;
     case OS_GAMES_HUB:       ui_mark_dirty(0, 22, 320, 198); os_scr_gameshub(ctx, now); break;
     case OS_SCORE:           ui_mark_dirty(0, 22, 320, 198); os_scr_score(ctx, now); break;
     case OS_TRIP:            ui_mark_dirty(0, 22, 320, 198); os_scr_trip(ctx, now); break;
@@ -1480,10 +1455,7 @@ void os_draw_tft(os_ctx_t *ctx, uint32_t now)
     }
 }
 
-void os_draw_oled(os_ctx_t *ctx, uint32_t now)
-{
-    os_oled_apply(ctx, now);                   /* internally throttled 80ms */
-}
+/* Oct 2026: os_draw_oled removed (OLED hardware removed). */
 
 void os_game_frame(os_ctx_t *ctx, const xbox360_pad_t *pad, uint32_t now)
 {

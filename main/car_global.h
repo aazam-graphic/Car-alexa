@@ -114,9 +114,7 @@ void     car_roof_apply_saved(void);               /* apply stored roof pattern/
 void     car_display_apply_saved(void);            /* TFT flip + matrix saved settings */
 uint8_t  car_get_rgb_bright(void);                 /* 10..72 matrix brightness */
 void     car_set_rgb_bright(uint8_t v);            /* live-apply */
-uint8_t  car_get_tft_flip(void);                   /* 0 normal 1 180-flip */
-void     car_set_tft_flip(uint8_t v);              /* live-apply */
-uint8_t  car_get_mx_ori(void);                     /* 0..3 matrix orientation */
+uint8_t  car_get_mx_ori(void);                     /* 0 LANDSCAPE 1 PORTRAIT */
 void     car_set_mx_ori(uint8_t v);                /* live-apply */
 uint8_t  car_get_mx_idle(void);                    /* 0 FALAK 1 SWEEP 2 OFF */
 void     car_set_mx_idle(uint8_t v);               /* live-apply */
@@ -124,7 +122,6 @@ uint8_t  car_get_mx_fx(void);                      /* 0 minimal 1 full */
 void     car_set_mx_fx(uint8_t v);
 void     car_cycle_gear(void);                     /* g.gear = (g.gear+1)%5 */
 uint8_t  car_speed_cap_pct(void);                  /* min(speed_cap, gear_caps[gear]) */
-void     car_oled_hud(void);                       /* legacy OLED mini HUD render */
 void     car_sfx_click(void);                      /* short UI click */
 void     car_sfx_score(void);                      /* score blip */
 void     car_sfx_bad(void);                        /* error/crash */
@@ -140,12 +137,7 @@ float    trip_max_tilt(void);
 void     trip_reset(void);
 bool     car_us_front_ok(void);                    /* front sensor echo valid */
 
-/* ------------------- OLED driver wrappers (car.c) ----------------------- */
-void osd_oled_clear(void);
-void osd_oled_rect(int x1, int y1, int x2, int y2, bool fill);
-void osd_oled_text(int x, int y, const char *s);
-void osd_oled_text_big(int x, int y, const char *s, int scale);
-void osd_oled_flush(void);
+/* Oct 2026: OLED removed (hardware removed) — wrappers deleted. */
 
 #ifdef __cplusplus
 }

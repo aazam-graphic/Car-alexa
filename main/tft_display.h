@@ -52,9 +52,7 @@ void tft_push_fb(uint16_t *fb);
 void tft_push_fb_region(uint16_t *fb, int x, int y, int w, int h); // dirty-rect push
 uint16_t* tft_get_fb(void); // returns internal DMA fb if allocated
 
-// high level test / status
-void tft_test_once(void);   // color bars + info
-void tft_show_status(int mode, int batt_mv, int dist_f, int dist_l, int dist_r, int dist_b, int speed_pct);
+// high level test / status (removed Oct 2026: dead, uncalled)
 
 #define RGB565(r,g,b) ( ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3) )
 #define TFT_BLACK   0x0000

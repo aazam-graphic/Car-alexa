@@ -22,6 +22,7 @@
 #include "net_wifi.h" /* PART 10: connectivity window */
 #include "snd_bank.h" /* standby: first-sync ding */
 #include "game_serpent.h" /* HOME MATRIX tile hiscore */
+#include "led_matrix.h"   /* hub MATRIX tile offline grey */
 #include <time.h>     /* standby clock: IST wall time */
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -125,7 +126,7 @@ void os_scr_boot(const os_ctx_t *ctx, uint32_t now)
 /* Premium minimal table clock: cream card, giant time, date top, weekday +
    numeric date below, subtle PRESS START. No status rows, no footers.
    Sync appears ONLY as a 1.5 s toast after SNTP locks. Before sync the
-   time shows "--:--" placeholders — never a faked time. */
+   time shows "--:--" placeholders â€” never a faked time. */
 #define SB_BG    RGB565(250, 247, 240)
 #define SB_INK   RGB565(32, 32, 36)
 #define SB_MUTED RGB565(130, 128, 122)
@@ -181,14 +182,19 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
     }
 
     /* top date + thin progress line (seconds within the minute) */
-    if (synced) {
-        time_t t = time(NULL);
+    /* instant clock: SNTP time, else last-known NVS epoch (marked OLD) */
+    time_t t = synced ? time(NULL) : net_wifi_last_known();
+    bool show = synced || t > 1700000000L;
+    bool stale = !synced && show;
+    if (show) {
         struct tm tm;
         localtime_r(&t, &tm);
         char db[28];
         strftime(db, sizeof(db), "%a, %d %b %Y", &tm);
         sb_str_upper(db);
         gfx_text_medium(20, 14, db, SB_INK);
+        if (stale)
+            gfx_text_small(250, 16, "OLD", SB_MUTED);   /* last-known, sync pending */
         gfx_rect(20, 36, 200, 3, SB_TRACK);
         int fill = 200 * tm.tm_sec / 60;
         if (fill > 0) gfx_rect(20, 36, fill, 3, SB_GOLD);
@@ -289,7 +295,7 @@ static const char *s_home_labels_p0[9] = {
     "DRIVE", "SNAKE", "SETTINGS", "GAMES", "DIAG", "RADAR", "ROOF", "TRIP", "NOTIFY"
 };
 static const char *s_home_labels_p1[9] = {
-    "OLED", "GRAPHS", "SCORE", "LINK", "CLOCK", "", "", "", ""
+    "GRAPHS", "SCORE", "LINK", "CLOCK", "", "", "", "", ""
 };
 static const ui_icon_t s_home_icons_p0[9] = {
     UI_ICON_DRIVE, UI_ICON_SCREEN, UI_ICON_GEAR,
@@ -297,9 +303,9 @@ static const ui_icon_t s_home_icons_p0[9] = {
     UI_ICON_LIGHT, UI_ICON_GRAPH, UI_ICON_WARN
 };
 static const ui_icon_t s_home_icons_p1[9] = {
-    UI_ICON_SCREEN, UI_ICON_GRAPH, UI_ICON_SPARK,
+    UI_ICON_GRAPH, UI_ICON_SPARK,
     UI_ICON_AUTO, UI_ICON_OK,
-    UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK
+    UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK
 };
 
 static void home_card_value(int slot, uint8_t page, char *out, size_t n)
@@ -329,14 +335,14 @@ static void home_card_value(int slot, uint8_t page, char *out, size_t n)
         }
     } else {
         switch (slot) {
-        case 1: {
+        case 0: {
             imu_adv_snap_t sn;
             imu_adv_snapshot(&sn);
             snprintf(out, n, "%u %c", (unsigned)sn.drive_score, sn.drive_grade);
             break;
         }
-        case 3: snprintf(out, n, "%s", net_wifi_up() ? "WIFI" : "OFF"); break;
-        case 4: snprintf(out, n, "IDLE"); break;
+        case 2: snprintf(out, n, "%s", net_wifi_up() ? "WIFI" : "OFF"); break;
+        case 3: snprintf(out, n, "IDLE"); break;
         default: snprintf(out, n, "OPEN"); break;
         }
     }
@@ -371,7 +377,7 @@ void os_scr_home(const os_ctx_t *ctx, uint32_t now)
 
     const char *const *labels = ctx->home_page ? s_home_labels_p1 : s_home_labels_p0;
     const ui_icon_t *icons = ctx->home_page ? s_home_icons_p1 : s_home_icons_p0;
-    const int ntiles = ctx->home_page ? 5 : 9;   /* p1: no spare tiles */
+    const int ntiles = ctx->home_page ? 4 : 9;   /* p1: GRAPHS SCORE LINK CLOCK */
     for (int i = 0; i < ntiles; i++) {
         int col = i % 3, row = i / 3;
         int x = 8 + col * 103, y = 34 + row * 64, w = 98, h = 52;
@@ -410,7 +416,7 @@ static void smooth_val(int *store, int target, int div)
     if (abs(target - *store) <= 1) *store = target;
 }
 
-/* --- status strip (guide �5 lower strip): 6 compact chips at bottom of Drive --- */
+/* --- status strip (guide ï¿½5 lower strip): 6 compact chips at bottom of Drive --- */
 static void draw_status_strip(const os_ctx_t *ctx, int y)
 {
     struct { ui_icon_t ic; bool on; uint16_t col; const char *lbl; } chips[6] = {
@@ -433,7 +439,7 @@ static void draw_status_strip(const os_ctx_t *ctx, int y)
     }
 }
 
-/* --- sensor view (guide �7): large L/F/R distances front-and-center --- */
+/* --- sensor view (guide ï¿½7): large L/F/R distances front-and-center --- */
 static void draw_sensor_view(const os_ctx_t *ctx, int s_l, int s_f, int s_r, uint16_t obs)
 {
     static const char *dn[3] = { "LEFT", "FRONT", "RIGHT" };
@@ -452,7 +458,7 @@ static void draw_sensor_view(const os_ctx_t *ctx, int s_l, int s_f, int s_r, uin
     }
 }
 
-/* --- performance view (guide �7): speed cap, gear caps, turbo, mode --- */
+/* --- performance view (guide ï¿½7): speed cap, gear caps, turbo, mode --- */
 static void draw_performance_view(const os_ctx_t *ctx, int s_spd, uint32_t now)
 {
     char buf[32];
@@ -543,7 +549,7 @@ static void draw_quick_overlay(const os_ctx_t *ctx)
     }
 }
 
-/* --- roof light quick panel (premium guide �6.3): B hold. --- */
+/* --- roof light quick panel (premium guide ï¿½6.3): B hold. --- */
 /* PART 7 roof bottom sheet: MODE / COLOR (steady only) / BRIGHTNESS */
 static void draw_roof_panel(const os_ctx_t *ctx)
 {
@@ -597,7 +603,7 @@ static void draw_roof_panel(const os_ctx_t *ctx)
                         UI_FONT_SMALL, UI_MUTED);
 }
 
-/* --- AUTO drive-mode preview overlay (premium guide �13): X tap. --- */
+/* --- AUTO drive-mode preview overlay (premium guide ï¿½13): X tap. --- */
 static void draw_auto_preview(const os_ctx_t *ctx)
 {
     int x = 44, y = 34, w = 232, h = 132;
@@ -633,7 +639,7 @@ static void draw_auto_preview(const os_ctx_t *ctx)
                         UI_FONT_MEDIUM, ready ? UI_OK : UI_DANGER);
 }
 
-/* --- drive HUD toast (premium guide �9): 1.2 s, above the HUD. --- */
+/* --- drive HUD toast (premium guide ï¿½9): 1.2 s, above the HUD. --- */
 static void draw_toast(const os_ctx_t *ctx)
 {
     if (!ctx->toast[0]) return;
@@ -703,13 +709,13 @@ void os_scr_drive(const os_ctx_t *ctx, uint32_t now)
     uint16_t obs = car_get_setting(2);
     char buf[16];
 
-    /* --- gear flash (guide �10): highlight on gear change --- */
+    /* --- gear flash (guide ï¿½10): highlight on gear change --- */
     if (ctx->gear_flash && now < ctx->gear_flash_until) {
         gfx_rect(120, 30, 80, 20, UI_ACCENT);
         gfx_text_center_box(120, 32, 80, "GEAR", UI_FONT_SMALL, UI_TEXT);
     }
 
-    /* --- AUTO blocked reason (guide �9): show exact reason --- */
+    /* --- AUTO blocked reason (guide ï¿½9): show exact reason --- */
     if (g.mode == MODE_AUTO) {
         const char *reason = NULL;
         if (g.estop) reason = "AUTO BLOCKED - ESTOP";
@@ -719,7 +725,7 @@ void os_scr_drive(const os_ctx_t *ctx, uint32_t now)
         if (reason) { gfx_text_center_box(0, 24, 320, reason, UI_FONT_SMALL, UI_WARNING); ui_mark_dirty(0, 22, 320, 14); }
     }
 
-    /* --- sub-view switch (guide �7): Sensor / Performance --- */
+    /* --- sub-view switch (guide ï¿½7): Sensor / Performance --- */
     switch (ctx->drive_sub_view) {
     case 1: draw_sensor_view(ctx, s_l, s_f, s_r, obs); break;
     case 2: draw_performance_view(ctx, s_spd, now); break;
@@ -800,7 +806,7 @@ void os_scr_drive(const os_ctx_t *ctx, uint32_t now)
         ui_pill(px + i * (pw + gap), 196, pw, gb, i == (int)ctx->gear);
     }
     }
-    /* --- status strip (guide �5 lower strip) --- */
+    /* --- status strip (guide ï¿½5 lower strip) --- */
     if (ctx->drive_sub_view == 0) { draw_status_strip(ctx, 170); ui_mark_dirty(0, 168, 320, 22); }
 
     /* --- steering direction indicator (guide 9 center zone) --- */
@@ -881,7 +887,7 @@ void os_scr_drive(const os_ctx_t *ctx, uint32_t now)
         gfx_rect(wx, wy, ww, wh, UI_SURFACE_2);
         gfx_rect_outline(wx, wy, ww, wh, pulse ? UI_DANGER : UI_SURFACE_3);
         ui_draw_icon(wx + 18, wy + 14, 16, UI_ICON_WARN, UI_DANGER);
-        {   /* 164px box fits 13 MEDIUM chars — truncate, never spill */
+        {   /* 164px box fits 13 MEDIUM chars â€” truncate, never spill */
             char am[16];
             snprintf(am, sizeof(am), "%.13s", ctx->alert_message);
             gfx_text_center_box(wx + 30, wy + 15, ww - 44, am,
@@ -889,7 +895,7 @@ void os_scr_drive(const os_ctx_t *ctx, uint32_t now)
         }
     }
 
-    /* --- bottom bar: context-aware with sub-view cycling (guide �7) --- */
+    /* --- bottom bar: context-aware with sub-view cycling (guide ï¿½7) --- */
     {
         const char *sub_names[4] = { "RADAR", "SENSOR", "PERFORMANCE", "NIGHT" };
         char hint[48];
@@ -930,7 +936,7 @@ void os_scr_safety_overlay(const os_ctx_t *ctx, uint32_t now)
     int wx = 56, wy = 102, ww = 208, wh = 44;
     gfx_rect(wx, wy, ww, wh, UI_SURFACE_2);
     gfx_rect_outline(wx, wy, ww, wh, pulse ? UI_DANGER : UI_SURFACE_3);
-    /* box fits 17 MEDIUM chars — truncate, never spill into widgets */
+    /* box fits 17 MEDIUM chars â€” truncate, never spill into widgets */
     {
         char am[20];
         snprintf(am, sizeof(am), "%.17s", ctx->alert_message);
@@ -979,7 +985,7 @@ static void plot_card(int x, int y, int w, int h, const int16_t *hist,
 void os_scr_analytics(const os_ctx_t *ctx, uint32_t now)
 {
     /* LAG FIX Oct 2026: history updates at 10 Hz; skip extra full pushes.
-       (Caller pre-marked dirty — clear it so the unchanged frame is skipped.) */
+       (Caller pre-marked dirty â€” clear it so the unchanged frame is skipped.) */
     {
         static uint32_t s_last = 0;
         if ((int32_t)(now - s_last) < 100) { ui_clear_dirty(); return; }
@@ -1146,10 +1152,10 @@ void os_scr_diag(const os_ctx_t *ctx, uint32_t now)
         gfx_text_medium(x, y, buf, UI_TEXT); y += 26;
         snprintf(buf, sizeof(buf), "TFT RATE    ~30 FPS (33ms)");
         gfx_text_medium(x, y, buf, UI_TEXT); y += 26;
-        snprintf(buf, sizeof(buf), "OLED        128x64 throttled");
-        gfx_text_medium(x, y, buf, UI_TEXT); y += 26;
-        snprintf(buf, sizeof(buf), "OLED RATE   ~12 FPS (80ms)");
-        gfx_text_medium(x, y, buf, UI_TEXT); y += 26;
+        snprintf(buf, sizeof(buf), "OLED        REMOVED Oct26");
+        gfx_text_medium(x, y, buf, UI_MUTED); y += 26;
+        snprintf(buf, sizeof(buf), "MPU         DISABLED");
+        gfx_text_medium(x, y, buf, UI_MUTED); y += 26;
         snprintf(buf, sizeof(buf), "ROOF        %s %u%% [%s]",
                  roof_light_state()->enabled ? "ON" : "OFF",
                  roof_light_state()->brightness,
@@ -1181,21 +1187,20 @@ void os_scr_diag(const os_ctx_t *ctx, uint32_t now)
 /* ------------------------------ SETTINGS --------------------------------- */
 /* guide 5.6: left category list (max 5 visible rows + scroll), right large
    value panel, draft editing. A applies item, START saves all, B discards. */
-#define SET_ITEM_COUNT_LOCAL 19   /* keep in sync with car_os.h SET_ITEM_COUNT */
+#define SET_ITEM_COUNT_LOCAL 18   /* keep in sync with car_os.h SET_ITEM_COUNT */
 static const char *s_set_names[SET_ITEM_COUNT_LOCAL] = {
     "SPEED CAP", "ENGINE VOL", "OBST DIST", "LED BRIGHT",
     "GEAR 1", "GEAR 2", "GEAR 3", "GEAR 4", "GEAR 5",
-    "OLED LAYOUT", "HUD LAYOUT", "MIST MAX", "TFT BRIGHT",
+    "HUD LAYOUT", "MIST MAX", "TFT BRIGHT",
     "RUMBLE", "RGB BRIGHT", "MATRIX ORIENT", "IDLE SHOW", "GAME FX",
     "SAVE"
 };
 static const char *s_set_cat[SET_ITEM_COUNT_LOCAL] = {
     "DRIVE", "AUDIO", "SAFETY", "LIGHTS",
     "GEARS", "GEARS", "GEARS", "GEARS", "GEARS",
-    "OLED", "DISPLAY", "SAFETY", "DISPLAY",
+    "DISPLAY", "SAFETY", "DISPLAY",
     "GAME", "MATRIX", "MATRIX", "MATRIX", "GAME", ""
 };
-static const char *s_oled_layout_names[4] = { "MINI HUD", "RADAR", "STATUS", "TEXT" };
 static const char *s_hud_layout_names[3] = { "FULL", "COMPACT", "NIGHT" };
 
 void os_scr_settings(const os_ctx_t *ctx, uint32_t now)
@@ -1257,8 +1262,8 @@ void os_scr_settings(const os_ctx_t *ctx, uint32_t now)
     case 3: v = ctx->draft.led_bright;  vmin = 10; vmax = 100; is_bar = true; break;
     case 4: case 5: case 6: case 7: case 8:
         v = ctx->draft.gear_caps[sel - 4]; vmin = 10; vmax = 100; is_bar = true; break;
-    case 12: v = ctx->draft.tft_bright; vmin = 0; vmax = 100; is_bar = true; break;
-    case 14: v = ctx->draft.rgb_bright; vmin = 10; vmax = 72; is_bar = true; break;
+    case 11: v = ctx->draft.tft_bright; vmin = 0; vmax = 100; is_bar = true; break;
+    case 13: v = ctx->draft.rgb_bright; vmin = 1; vmax = 100; is_bar = true; break;
     default: break;
     }
 
@@ -1268,37 +1273,33 @@ void os_scr_settings(const os_ctx_t *ctx, uint32_t now)
     static const char *fx_names[2] = { "MINIMAL", "FULL" };
 
     if (sel == 9) {
-        snprintf(buf, sizeof(buf), "<%s>", s_oled_layout_names[ctx->draft.oled_layout % 4]);
-        gfx_text_center_box(rx, ry + 58, rw, buf, UI_FONT_LARGE, UI_ACCENT);
-        gfx_text_center_box(rx, ry + 108, rw, "L/R CHOICE", UI_FONT_SMALL, UI_MUTED);
-    } else if (sel == 10) {
         snprintf(buf, sizeof(buf), "<%s>", s_hud_layout_names[ctx->draft.hud_layout % 3]);
         gfx_text_center_box(rx, ry + 58, rw, buf, UI_FONT_LARGE, UI_ACCENT);
         gfx_text_center_box(rx, ry + 108, rw, "L/R CHOICE", UI_FONT_SMALL, UI_MUTED);
-    } else if (sel == 11) {
+    } else if (sel == 10) {
         if (ctx->draft.mist_max == 0)
             snprintf(buf, sizeof(buf), "UNLIMITED");
         else
             snprintf(buf, sizeof(buf), "%us", ctx->draft.mist_max * 10);
         gfx_text_center_box(rx, ry + 58, rw, buf, UI_FONT_LARGE, UI_ACCENT);
         gfx_text_center_box(rx, ry + 108, rw, "AUTO CUT-OFF TIME", UI_FONT_SMALL, UI_MUTED);
-    } else if (sel == 13) {
+    } else if (sel == 12) {
         snprintf(buf, sizeof(buf), "<%s>", rum_names[ctx->draft.rumble_mode % 3]);
         gfx_text_center_box(rx, ry + 58, rw, buf, UI_FONT_LARGE, UI_ACCENT);
         gfx_text_center_box(rx, ry + 108, rw, "OFF / SOFT / FULL", UI_FONT_SMALL, UI_MUTED);
-    } else if (sel == 15) {
+    } else if (sel == 14) {
         snprintf(buf, sizeof(buf), "<%s>", ori_names[ctx->draft.matrix_orient % 2]);
         gfx_text_center_box(rx, ry + 58, rw, buf, UI_FONT_LARGE, UI_ACCENT);
         gfx_text_center_box(rx, ry + 108, rw, "LANDSCAPE/PORTRAIT", UI_FONT_SMALL, UI_MUTED);
-    } else if (sel == 16) {
+    } else if (sel == 15) {
         snprintf(buf, sizeof(buf), "<%s>", idle_names[ctx->draft.idle_show % 3]);
         gfx_text_center_box(rx, ry + 58, rw, buf, UI_FONT_LARGE, UI_ACCENT);
         gfx_text_center_box(rx, ry + 108, rw, "IDLE ANIMATION", UI_FONT_SMALL, UI_MUTED);
-    } else if (sel == 17) {
+    } else if (sel == 16) {
         snprintf(buf, sizeof(buf), "<%s>", fx_names[ctx->draft.game_fx % 2]);
         gfx_text_center_box(rx, ry + 58, rw, buf, UI_FONT_LARGE, UI_ACCENT);
         gfx_text_center_box(rx, ry + 108, rw, "GAME EFFECTS", UI_FONT_SMALL, UI_MUTED);
-    } else if (sel == 18) {
+    } else if (sel == 17) {
         gfx_text_center_box(rx, ry + 58, rw, "SAVE ALL", UI_FONT_LARGE, UI_OK);
         gfx_text_center_box(rx, ry + 108, rw, "WRITE LIVE + NVS", UI_FONT_SMALL, UI_MUTED);
     } else {
@@ -1320,134 +1321,16 @@ void os_scr_settings(const os_ctx_t *ctx, uint32_t now)
 
     ui_draw_bottombar("A:APPLY  B:BACK  START:SAVE", "SETTINGS");
 }
-
-/* ------------------------------ OLED CTRL -------------------------------- */
-/* guide 5.7: enlarged 128x64 preview rendered from the same model as the
-   physical OLED + layout pills. Preview shows the SELECTED layout (Y-style
-   preview); A applies it to the physical OLED. */
-static int s_ol_x = 0, s_ol_y = 0;   /* OLED preview origin (fb-space) */
-
-static void ol_bar(int x, int y, int w, int h, uint16_t c)
-{
-    gfx_rect(s_ol_x + x * 2, s_ol_y + y * 2, w * 2, h * 2, c);
-}
-
-static void ol_text(int x, int y, const char *s, uint16_t c, int scale)
-{
-    gfx_text(s_ol_x + x * 2, s_ol_y + y * 2, s, c, 0, scale);
-}
-
-static void ol_text_center(const char *s, int y, uint16_t c, int scale)
-{
-    int w = gfx_text_w(s, scale);
-    int x = (128 - w) / 2;
-    if (x < 0) x = 0;
-    gfx_text(s_ol_x + x * 2, s_ol_y + y * 2, s, c, 0, scale);
-}
-
-static void oled_preview(uint8_t layout, const os_ctx_t *ctx)
-{
-    char buf[32];
-    int spd = (abs(g.cur_l) + abs(g.cur_r)) / 2;
-
-    switch (layout) {
-    case 0: /* MINI HUD */
-        ol_text(2, 2, "SPD", UI_TEXT, 1);
-        snprintf(buf, sizeof(buf), "%d", spd);
-        ol_text(2, 14, buf, UI_TEXT, 2);
-        snprintf(buf, sizeof(buf), "G%u", (unsigned)(ctx->gear + 1));
-        ol_text(72, 2, buf, UI_TEXT, 1);
-        ol_text(2, 48, "FRONT", UI_TEXT, 1);
-        if (g.dist_avg[1] != 65535) {
-            snprintf(buf, sizeof(buf), "%u", g.dist_avg[1]);
-            ol_text(72, 48, buf, UI_TEXT, 1);
-        } else {
-            ol_text(72, 48, "--", UI_TEXT, 1);
-        }
-        break;
-    case 1: { /* RADAR */
-        snprintf(buf, sizeof(buf), "SPD %3d%% G%u", spd, (unsigned)(ctx->gear + 1));
-        ol_text(2, 2, buf, UI_TEXT, 1);
-        static const char *dn[3] = { "L", "F", "R" };
-        for (int i = 0; i < 3; i++) {
-            int d = (g.dist_avg[i] == 65535) ? -1 : (int)g.dist_avg[i];
-            int y = 18 + i * 16;
-            ol_text(2, y, dn[i], UI_TEXT, 1);
-            int bw = (d < 0) ? 0 : ((d > 100) ? 100 : d) * 88 / 100;
-            ol_bar(16, y, 2 + bw, 10, UI_TEXT);
-            if (d >= 0) { snprintf(buf, sizeof(buf), "%d", d); ol_text(108, y, buf, UI_TEXT, 1); }
-            else        ol_text(108, y, "--", UI_TEXT, 1);
-        }
-        ol_text(2, 56, "STATUS", UI_TEXT, 1);
-        break;
-    }
-    case 2: /* STATUS */
-        ol_text_center("CAR OS", 16, UI_TEXT, 3);
-        ol_text(14, 50, "PAUSED", UI_TEXT, 1);
-        break;
-    default: /* 3 = CUSTOM TEXT */
-        ol_text_center(ctx->oled_text, 24, UI_TEXT, 2);
-        ol_text(2, 56, "CUSTOM", UI_TEXT, 1);
-        break;
-    }
-}
-
-void os_scr_oledctrl(const os_ctx_t *ctx, uint32_t now)
-{
-    /* LAG FIX: static preview; redraw on 4 FPS cadence. */
-    {
-        static uint32_t s_last = 0;
-        if ((int32_t)(now - s_last) < 250) { ui_clear_dirty(); return; }
-        s_last = now;
-    }
-    gfx_clear(UI_BG);
-    ui_draw_topbar(ctx);
-
-    static const char *names[4] = { "MINI HUD", "RADAR", "STATUS", "TEXT" };
-
-    /* --- preview window (128x64 scaled x2 + border) --- */
-    int bx = 22, by = 36, bw = 276, bh = 146;
-    gfx_rect(bx, by, bw, bh, UI_SURFACE);
-    gfx_rect_outline(bx, by, bw, bh, UI_BORDER);
-    gfx_text_small(bx + 6, by + 5, "OLED PREVIEW 128x64 (x2)", UI_MUTED);
-    s_ol_x = bx + 10;
-    s_ol_y = by + 16;                 /* content area 256x128, black OLED bg */
-    oled_preview(ctx->oled_sel, ctx);
-
-    /* --- layout pills row --- */
-    int pw = 66, gap = 6, total = 4 * pw + 3 * gap;
-    int px = (UI_W - total) / 2;
-    for (int i = 0; i < 4; i++) {
-        int lx = px + i * (pw + gap), ly = 194;
-        bool sel = (i == (int)ctx->oled_sel);
-        bool active = (i == (int)ctx->oled_layout);
-        uint16_t bg, border, fg;
-        if (active && sel)       { bg = UI_ACCENT; border = UI_ACCENT; fg = RGB565(20,12,0); }
-        else if (active)         { bg = UI_ACCENT_DARK; border = UI_ACCENT; fg = UI_TEXT; }
-        else if (sel)            { bg = UI_SURFACE_2; border = UI_ACCENT; fg = UI_TEXT; }
-        else                     { bg = UI_SURFACE_3; border = UI_BORDER; fg = UI_MUTED; }
-        gfx_rect(lx, ly, pw, 20, bg);
-        gfx_rect_outline(lx, ly, pw, 20, border);
-        gfx_text_center_box(lx, ly + 6, pw, names[i], UI_FONT_SMALL, fg);
-    }
-
-    /* custom text editor hint when TEXT selected */
-    if (ctx->oled_sel == 3) {
-        gfx_text_center_box(0, 220, UI_W, "L/R: CHANGE TEXT PRESET",
-                            UI_FONT_SMALL, UI_MUTED);
-    }
-    gfx_text_center_box(0, 208, UI_W, "UP/DN LAYOUT  A:APPLY  Y:PREVIEW  B:BACK",
-                        UI_FONT_SMALL, UI_MUTED);
-    scr_footer(ctx);
-}
+/* Oct 2026: OLED CTRL screen removed (hardware removed). */
 
 /* ------------------------------ GAMES HUB -------------------------------- */
 /* guide 5.8: theme rows - number badge + icon + name/desc, amber focus. */
 static const ui_icon_t s_game_icons[OS_GAME_COUNT] = {
     UI_ICON_SPARK,   /* NEON CONVOY  */
     UI_ICON_AUTO,    /* NEON SERPENT */
+    UI_ICON_SCREEN,  /* MATRIX SNAKE */
 };
-static const char *const s_game_nums[OS_GAME_COUNT] = { "1", "2" };
+static const char *const s_game_nums[OS_GAME_COUNT] = { "1", "2", "3" };
 
 void os_scr_gameshub(const os_ctx_t *ctx, uint32_t now)
 {
@@ -1475,10 +1358,16 @@ void os_scr_gameshub(const os_ctx_t *ctx, uint32_t now)
         gfx_text_center_box(16, y + 10, 22, s_game_nums[i], UI_FONT_SMALL,
                             foc ? RGB565(20, 12, 0) : UI_MUTED);
 
-        /* icon + name + desc */
-        ui_draw_icon(48, y + 7, 16, s_game_icons[i], foc ? UI_ACCENT : UI_MUTED);
-        gfx_text_medium(72, y + 7, OS_GAMES[i].name, foc ? UI_TEXT : UI_TEXT_2);
-        gfx_text_right(304, y + 11, OS_GAMES[i].desc, UI_MUTED, 0, 1);
+        /* icon + name + desc (MATRIX greyed when offline) */
+        bool mx_off = (i == 2) && !led_matrix_ready();
+        ui_draw_icon(48, y + 7, 16, s_game_icons[i],
+                     mx_off ? UI_MUTED : (foc ? UI_ACCENT : UI_MUTED));
+        gfx_text_medium(72, y + 7, OS_GAMES[i].name,
+                        mx_off ? UI_MUTED : (foc ? UI_TEXT : UI_TEXT_2));
+        if (mx_off)
+            gfx_text_right(304, y + 11, "OFFLINE", UI_DANGER, 0, 1);
+        else
+            gfx_text_right(304, y + 11, OS_GAMES[i].desc, UI_MUTED, 0, 1);
     }
     ui_draw_bottombar("UP/DN:SELECT   A:PLAY   B:BACK", "GAMES HUB");
 }
@@ -1685,7 +1574,7 @@ void os_scr_switcher(const os_ctx_t *ctx, uint32_t now)
 void os_scr_jump(const os_ctx_t *ctx)
 {
     static const char *cats[7] = {
-        "DRIVE", "AUDIO", "SAFETY", "LIGHTS", "GEARS", "OLED", "DISPLAY"
+        "DRIVE", "AUDIO", "SAFETY", "LIGHTS", "GEARS", "DISPLAY", "GAME"
     };
     gfx_rect(70, 46, 180, 150, UI_SURFACE_2);
     gfx_rect_outline(70, 46, 180, 150, UI_ACCENT);
@@ -1712,6 +1601,13 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
     serpent_status_t s;
     serpent_arcade_get_status(&s);
 
+    /* PLAY: 10 FPS enough (mirror steps max ~8/s); lets car loop hit 20 ms */
+    if (s.state == 4) {
+        static uint32_t s_last_play = 0;
+        if ((int32_t)(now - s_last_play) < 100) return;
+        s_last_play = now;
+    }
+
     static uint8_t  p_state = 0xFF;
     static uint32_t p_score = 0xFFFFFFFF, p_hi = 0xFFFFFFFF;
     static uint8_t  p_level = 0xFF, p_food = 0xFF, p_len = 0xFF;
@@ -1733,7 +1629,9 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
             "CRASH", "RETRY", "LEVEL UP", "OVER"
         };
         const char *chip = s.state < 10 ? chips[s.state] : "?";
-        uint16_t cc = (s.state == 4) ? UI_OK :
+        if (s.pad_lost) chip = "PAD LOST";
+        uint16_t cc = s.pad_lost ? UI_DANGER :
+                      (s.state == 4) ? UI_OK :
                       (s.state == 6) ? UI_DANGER :
                       (s.state == 9) ? UI_WARNING : UI_DATA;
         gfx_rect(8, 4, 170, 20, UI_SURFACE);
@@ -1743,8 +1641,10 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
         gfx_text_center_box(214, 8, 98, chip, UI_FONT_SMALL, cc);
     }
 
-    /* mirror: dirty cells only (full on state change) */
+    /* mirror: draw only cells whose RGB changed (shadow diff) */
     {
+        static uint8_t shadow[120][3];
+        static bool shadow_ok = false;
         int pitch = (s.fw <= 10 && s.fh > 10) ? 11 : 14;
         int cw = pitch - 2;
         int mw = s.fw * pitch, mh = s.fh * pitch;
@@ -1752,21 +1652,25 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
         if (full) {
             gfx_rect(8, 36, 166, 138, UI_SURFACE);
             gfx_rect_outline(8, 36, 166, 138, UI_BORDER);
+            shadow_ok = false;
         }
         for (int y = 0; y < s.fh && y < 12; y++) {
             for (int x = 0; x < s.fw && x < 12; x++) {
                 int idx = y * s.fw + x;
                 if (idx >= 120) continue;
-                bool dirty = full || (s.mirror_dirty[idx >> 5] & (1u << (idx & 31)));
-                if (!dirty) continue;
-                uint16_t c = mir_px(s.frame_rgb[idx][0], s.frame_rgb[idx][1],
-                                    s.frame_rgb[idx][2]);
+                uint8_t r = s.frame_rgb[idx][0];
+                uint8_t g = s.frame_rgb[idx][1];
+                uint8_t b = s.frame_rgb[idx][2];
+                if (shadow_ok && shadow[idx][0] == r &&
+                    shadow[idx][1] == g && shadow[idx][2] == b) continue;
+                shadow[idx][0] = r; shadow[idx][1] = g; shadow[idx][2] = b;
+                uint16_t c = mir_px(r, g, b);
                 gfx_rect(mx + x * pitch, my + y * pitch, cw, cw,
-                         (s.frame_rgb[idx][0] | s.frame_rgb[idx][1] |
-                          s.frame_rgb[idx][2]) ? c : UI_BG);
+                         (r | g | b) ? c : UI_BG);
                 ui_mark_dirty(mx + x * pitch, my + y * pitch, cw, cw);
             }
         }
+        shadow_ok = true;
     }
 
     /* score hero (6 digits 7-seg) */
@@ -1833,16 +1737,25 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
     }
     /* bonus bar / banner */
     {
+        static uint8_t p_pad = 0xFF, p_endl = 0xFF, p_st8 = 0xFF;
         bool bon = s.bonus_ms_left > 0;
         uint16_t bms = s.bonus_ms_left > 7000 ? 7000 : s.bonus_ms_left;
-        if (full || (p_bonus > 0) != bon || (bon && (bms / 700) != (p_bms / 700))) {
+        if (full || (p_bonus > 0) != bon || (bon && (bms / 700) != (p_bms / 700)) ||
+            p_pad != s.pad_lost || p_endl != (s.endless && s.state == 4) ||
+            p_st8 != (s.state == 8)) {
+            p_pad = s.pad_lost; p_endl = (s.endless && s.state == 4);
+            p_st8 = (s.state == 8);
             p_bonus = bon ? 1 : 0; p_bms = bms;
             gfx_rect(8, 180, 304, 14, UI_BG);
             if (bon) {
                 gfx_text_small(12, 182, "BONUS", UI_WARNING);
                 ui_progress(70, 182, 100, 8, bms, 7000, UI_WARNING);
+            } else if (s.pad_lost) {
+                gfx_text_small(12, 182, "RECONNECT PAD", UI_DANGER);
             } else if (s.state == 8) {
                 gfx_text_small(12, 182, s.winfx ? "BOARD FULL!" : "LEVEL CLEAR", UI_OK);
+            } else if (s.endless && s.state == 4) {
+                gfx_text_small(12, 182, "ENDLESS", UI_WARNING);
             } else if (s.state == 6 || s.state == 7) {
                 char lb[24];
                 snprintf(lb, sizeof(lb), "LIFE LOST  %d LEFT", s.lives);
@@ -1855,25 +1768,26 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
         p_newhi = s.new_hi;
     }
     /* stats row (OVER shows death reason) */
+    static uint8_t p_rgb = 0xFF;
+    uint8_t rgbnow = car_get_rgb_bright();
     if (full || p_len != s.len || p_step != s.step_ms || p_rum != s.rumble_mode ||
-        p_state == 9 || s.state == 9) {
-        p_len = s.len; p_step = s.step_ms; p_rum = s.rumble_mode;
+        p_rgb != rgbnow || p_state == 9 || s.state == 9) {
+        p_len = s.len; p_step = s.step_ms; p_rum = s.rumble_mode; p_rgb = rgbnow;
         char b[48];
-        static const char *rm[3] = { "OFF", "SOFT", "FULL" };
         if (s.state == 9) {
             static const char *dr[] = { "", "WALL", "SELF", "MINE" };
             const char *d = s.death_reason < 4 ? dr[s.death_reason] : "?";
             snprintf(b, sizeof(b), "DIED: %s  SCORE %lu", d, (unsigned long)s.score);
         } else {
             float sps = s.step_ms ? 1000.0f / s.step_ms : 0;
-            snprintf(b, sizeof(b), "LEN %d  SPD %.1f/s  RUMBLE %s",
-                     s.len, (double)sps, rm[s.rumble_mode % 3]);
+            snprintf(b, sizeof(b), "LEN %d SPD %.1f RGB %d%%",
+                     s.len, (double)sps, car_get_rgb_bright());
         }
         gfx_rect(8, 198, 304, 16, UI_BG);
         gfx_text_small(12, 201, b, UI_TEXT_2);
         ui_mark_dirty(8, 198, 304, 16);
     }
-    /* footer hints */
+    /* footer hints via bottombar (custom rect would overlap it) */
     {
         const char *f = (s.state == 1) ? "UP/DN LVL  START PLAY" :
                         (s.state == 4) ? "START PAUSE  BACK HOLD EXIT" :
@@ -1884,10 +1798,7 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
         static char pf[40] = {0};
         if (full || strcmp(pf, f)) {
             snprintf(pf, sizeof(pf), "%s", f);
-            gfx_rect(8, 218, 304, 18, UI_SURFACE);
-            gfx_text_center_box(8, 222, 304, f, UI_FONT_SMALL, UI_MUTED);
-            ui_mark_dirty(8, 218, 304, 18);
         }
+        ui_draw_bottombar(pf[0] ? pf : "BACK HOLD EXIT", "SNAKE");
     }
-    ui_draw_bottombar("BACK HOLD EXIT", "SNAKE");
 }
