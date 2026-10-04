@@ -1,0 +1,35 @@
+# ESP-IDF
+build/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.old
+sdkconfig.bak
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+# VS Code
+.vscode/
+# Windows
+Thumbs.db
+Desktop.ini
+# Logs
+*.log
+# Tools
+.cache/
+# Node
+node_modules/
+# Secrets - never push certs/keys to public repo
+*.pem
+*.key
+*.der
+*.p12
+function.zip
+*.zip
+# NVS binaries/csv contain private keys - NEVER commit
+nvs_*.bin
+nvs_*.csv
+*.bin
