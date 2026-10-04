@@ -11,7 +11,7 @@
 
 #define NOTIF_N 24
 
-/* writers: car_task (alerts, IMU, sound) + alexa_task (banner, rules).
+/* writers: car_task (alerts, IMU, sound, arcade).
    portMUX keeps ring indices + text tear-free across tasks. */
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 

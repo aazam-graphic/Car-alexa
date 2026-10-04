@@ -11,7 +11,7 @@
  * Hardware free-fall/motion INT register is used if MPU INT pin wired;
  * else 100 Hz software polling fallback (this build: fallback, INT not wired).
  *
- * Event bus: FreeRTOS queue, consumed by car.c / cockpit / alexa_bridge / rumble.
+ * Event bus: FreeRTOS queue, consumed by car.c / cockpit / rumble.
  *
  * SAFETY NOTE: these are ADDITIVE to GUIDE E-STOP, never a replacement.
  * Existing E-STOP clear rule (GUIDE tap + stationary + 250 ms neutral-release

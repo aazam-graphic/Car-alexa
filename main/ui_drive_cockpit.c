@@ -20,7 +20,6 @@
 #include "img_bank.h"   /* PART 6: wallpapers + car sprites */
 #include "mic_in.h"     /* PART 12: M3 VU overlay */
 #include "net_wifi.h"
-#include "alexa_bridge.h"
 
 /* ------------------------------ palette --------------------------------- */
 typedef struct {
@@ -328,12 +327,12 @@ static void draw_full(os_ctx_t *ctx, const cockpit_pal_t *p,
         }
         ui_clip_set(0, 0, 320, 21);
         pill(6, 4, 62, 13, col, word, RGB565(10, 14, 24));
-        /* activity dots: USB WiFi Alexa mic */
+        /* activity dots: USB WiFi clock-sync mic */
         {
             uint16_t dots[4];
             dots[0] = xbox360_dongle_connected() ? p->ok : p->grey;
             dots[1] = net_wifi_up() ? p->ok : p->grey;
-            dots[2] = alexa_mqtt_connected() ? p->ok : p->grey;
+            dots[2] = net_wifi_time_synced() ? p->ok : p->grey;
             dots[3] = mic_ready() ? p->ok : p->grey;
             for (int i = 0; i < 4; i++)
                 disc(148 + i * 13, 10, 2, dots[i]);
@@ -750,6 +749,15 @@ void ui_cockpit_draw(os_ctx_t *ctx, uint32_t now, bool skip_alert)
 
     uint8_t view = ctx->drive_sub_view % COCKPIT_VIEW_COUNT;
     uint8_t theme = ctx->cockpit_theme % COCKPIT_THEME_COUNT;
+    /* LAG FIX Oct 2026: cockpit marked full-dirty every frame (~30 ms push).
+       10 FPS is plenty for speed/distance — skip render otherwise. */
+    {
+        static uint32_t s_last = 0;
+        static uint8_t s_view = 0xFF, s_theme = 0xFF;
+        bool changed = (view != s_view) || (theme != s_theme);
+        if (!changed && (int32_t)(now - s_last) < 100) return;
+        s_last = now; s_view = view; s_theme = theme;
+    }
     if (view == COCKPIT_VIEW_NIGHT) theme = COCKPIT_THEME_NIGHT;  /* forced */
     const cockpit_pal_t *p = pal_for(theme);
 

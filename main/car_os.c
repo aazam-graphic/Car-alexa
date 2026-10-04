@@ -9,7 +9,6 @@
 #include "os_oled.h"
 #include "os_assets.h"
 #include "input_events.h"
-#include "alexa_bridge.h"
 #include "tft_display.h"
 #include "car_global.h"
 #include "imu_driver.h"
@@ -21,7 +20,6 @@
 #include "notif.h"
 #include "os_gfx.h"   /* PART 10: thumbnail capture */
 #include "os_theme.h" /* PART 12: radar-full clear color */
-#include "alexa_bridge.h"   /* PART 10: QCC profile dropdown */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -104,7 +102,6 @@ static bool is_menu_state(os_state_t st)
     case OS_SETTINGS:
     case OS_OLED_CTRL:
     case OS_GAMES_HUB:
-    case OS_ALEXA_LOG:
     case OS_SCORE:
     case OS_TRIP:
     case OS_CONN:
@@ -236,15 +233,15 @@ static const os_state_t s_tile_state_p0[9] = {
     OS_GAMES_HUB,  OS_DIAG,       OS_DRIVE_MAIN,   /* Games Diag Radar */
     OS_DRIVE_MAIN, OS_TRIP,       OS_NOTIF,        /* Roof Trip Notify */
 };
-static const os_state_t s_tile_state_p1[6] = {
+static const os_state_t s_tile_state_p1[5] = {
     OS_OLED_CTRL, OS_DRIVE_ANALYTICS, OS_SCORE,
-    OS_CONN,      OS_ALEXA_LOG,       OS_STANDBY,   /* 5 = PARK clock */
+    OS_CONN,      OS_STANDBY,         /* 4 = PARK clock */
 };
 
 static const char *s_names[] = {
     "BOOT", "HOME", "DRIVE", "ANALYTICS", "DIAG", "SETTINGS",
     "OLED CTRL", "GAMES", "LANE RUNNER", "NEON SERPENT", "REFLEX", "MEMORY", "SENSOR",
-    "REDLINE OPS", "VOICE LOG",
+    "REDLINE OPS",
     "SCORE", "TRIP", "CONNECT", "NOTIFY", "STANDBY", "ARMING"
 };
 static const char *s_hints[] = {
@@ -266,19 +263,13 @@ const char *os_state_hint(os_state_t st)
 }
 
 /* ---- Alexa bridge entry points (car_task context only) ------------------ */
-os_ctx_t *alexa_os_ctx(void) { return s_ctx; }
+os_ctx_t *car_os_ctx(void) { return s_ctx; }
 
 void os_request_screen(os_ctx_t *ctx, int st, uint32_t now)
 {
     if (!ctx || st < OS_BOOT || st > OS_DRIVE_ARMING) return;
     if (g.estop) return;
     go(ctx, (os_state_t)st, now);
-}
-
-void os_alexa_save_settings(os_ctx_t *ctx)
-{
-    if (!ctx) return;
-    settings_save_all(ctx);
 }
 
 /* unified input context (premium guide §3): single source of truth.
@@ -517,9 +508,6 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
        (safety priority 1) - no other path may exit E-stop. */
     if (g.estop) return;
 
-    /* Alexa confirm dialog (A/B) eats input on ANY screen while open */
-    if (alexa_confirm_handle_input(dig, tap, now)) return;
-
     /* global: BACK+START = HOME shortcut.
        Armed latch (guide 2.8): triggers once per press, re-arms only after at
        least one button is released -> no auto-retrigger while held. */
@@ -633,7 +621,7 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
     if (ev_tap(B_BACK) && is_menu_state(ctx->state) && ctx->state != OS_HOME &&
         !ctx->settings_confirm && !ctx->settings_jump && !ctx->diag_item &&
         !ctx->quick_open && !ctx->roof_panel && !ctx->picker_open &&
-        !ctx->switch_open && !ctx->auto_prev && !alexa_overlay_active()) {
+        !ctx->switch_open && !ctx->auto_prev) {
         if (ctx->state == OS_SETTINGS && ctx->settings_dirty) {
             /* unsaved edits: open the discard dialog instead of leaving */
             ctx->settings_confirm = 1;
@@ -760,8 +748,8 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
         break;
     }
 
-    case OS_HOME: {                    /* PART 10: widget cards, p0=9 p1=6 */
-        uint8_t ntiles = ctx->home_page ? 6 : 9;
+    case OS_HOME: {                    /* PART 10: widget cards, p0=9 p1=5 */
+        uint8_t ntiles = ctx->home_page ? 5 : 9;
         uint8_t row = ctx->home_sel / 3, col = ctx->home_sel % 3;
         if (tap & B_DUP)    { row = (row + 2) % 3; ctx->home_sel = row * 3 + col; car_sfx_blip(900); snd_play("ui_nav"); }
         if (tap & B_DDOWN)  { row = (row + 1) % 3; ctx->home_sel = row * 3 + col; car_sfx_blip(900); snd_play("ui_nav"); }
@@ -871,8 +859,8 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
         if (ctx->quick_open) {              /* PART 10.4 Quick Control Center */
             if (tap & B_START)  { ctx->quick_open = false; car_sfx_click(); snd_play("ui_close_sheet"); input_consume(B_START); break; }   /* close */
             if (tap & B_B)      { ctx->quick_open = false; car_sfx_click(); snd_play("ui_close_sheet"); input_consume(B_B); break; }
-            if (tap & B_DUP)   { ctx->quick_row = (uint8_t)((ctx->quick_row + 5) % 6); car_sfx_blip(900); }
-            if (tap & B_DDOWN) { ctx->quick_row = (uint8_t)((ctx->quick_row + 1) % 6); car_sfx_blip(900); }
+            if (tap & B_DUP)   { ctx->quick_row = (uint8_t)((ctx->quick_row + 4) % 5); car_sfx_blip(900); }
+            if (tap & B_DDOWN) { ctx->quick_row = (uint8_t)((ctx->quick_row + 1) % 5); car_sfx_blip(900); }
             switch (ctx->quick_row) {
             case 0: {                       /* 4 chips: HEAD/HAZARD/ROOF/MUTE */
                 if (tap & B_DLEFT)  { ctx->quick_col = (uint8_t)((ctx->quick_col + 3) % 4); car_sfx_blip(900); }
@@ -918,16 +906,6 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
                     car_sfx_blip(900);
                 }
                 break;
-            case 4: {                       /* PROFILE dropdown */
-                static uint8_t s_qprof = 1;
-                if (tap & B_DLEFT)  { s_qprof = (uint8_t)((s_qprof + 7) % 8); car_sfx_blip(900); }
-                if (tap & B_DRIGHT) { s_qprof = (uint8_t)((s_qprof + 1) % 8); car_sfx_blip(900); }
-                if (tap & B_A) {
-                    if (alexa_request_profile(s_qprof)) car_sfx_score();
-                    else { car_sfx_blip(250); snd_play("gear_limit"); }
-                }
-                break;
-            }
             default:                        /* EXIT TO HOME */
                 if (tap & B_A) {
                     ctx->quick_open = false;
@@ -1172,10 +1150,6 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
         if (tap & B_B) go(ctx, OS_HOME, now);
         break;
 
-    case OS_ALEXA_LOG:                  /* Alexa voice history */
-        if (tap & B_B) go(ctx, OS_HOME, now);
-        break;
-
     case OS_SCORE:                     /* PART 10 Drive Score window */
         if (tap & B_B) { os_win_pop(ctx, now); input_consume(B_B); }
         break;
@@ -1301,8 +1275,6 @@ static void alert_watch(os_ctx_t *ctx, uint32_t now)
 void os_update(os_ctx_t *ctx, uint32_t now)
 {
     if (!s_ctx) s_ctx = ctx;
-
-    alexa_apply_pending(ctx, now);   /* validated Alexa action (no-op idle) */
 
     /* boot splash -> STANDBY clock (car rests locked until START->menu) */
     if (ctx->state == OS_BOOT && now - ctx->state_enter_ms > 1500) {
@@ -1446,9 +1418,15 @@ void os_draw_tft(os_ctx_t *ctx, uint32_t now)
     case OS_HOME:            os_scr_home(ctx, now); break;          /* marks cards */
     case OS_DRIVE_MAIN: {
         if (ctx->radar_full) {   /* PART 12 BACK 1.5s Motion Radar full */
-            gfx_clear(UI_BG);
-            ui_motion_radar_draw(now, false);
-            ui_mark_dirty_full();
+            static uint32_t s_radar_last = 0;   /* LAG FIX: 10 FPS enough */
+            if ((int32_t)(now - s_radar_last) >= 100) {
+                s_radar_last = now;
+                gfx_clear(UI_BG);
+                ui_motion_radar_draw(now, false);
+                ui_mark_dirty_full();
+            } else {
+                ui_clear_dirty();
+            }
         } else {
             /* Drive Cockpit (1.md PART 3) + overlays */
             ui_cockpit_draw(ctx, now, true);   /* alerts via L5 safety */
@@ -1461,19 +1439,12 @@ void os_draw_tft(os_ctx_t *ctx, uint32_t now)
     case OS_SETTINGS:        ui_mark_dirty(0, 22, 320, 198); os_scr_settings(ctx, now); break;
     case OS_OLED_CTRL:       ui_mark_dirty(0, 22, 320, 198); os_scr_oledctrl(ctx, now); break;
     case OS_GAMES_HUB:       ui_mark_dirty(0, 22, 320, 198); os_scr_gameshub(ctx, now); break;
-    case OS_ALEXA_LOG:       ui_mark_dirty(0, 22, 320, 198); os_scr_alexa_log(ctx, now); break;
     case OS_SCORE:           ui_mark_dirty(0, 22, 320, 198); os_scr_score(ctx, now); break;
     case OS_TRIP:            ui_mark_dirty(0, 22, 320, 198); os_scr_trip(ctx, now); break;
     case OS_CONN:            ui_mark_dirty(0, 22, 320, 198); os_scr_conn(ctx, now); break;
     case OS_NOTIF:           ui_mark_dirty(0, 22, 320, 198); os_scr_notif(ctx, now); break;
     default: break;                            /* games draw themselves */
     }
-
-    /* Alexa overlays: banner + confirm dialog (self-expiring) */
-    bool ov_before = alexa_overlay_active();
-    alexa_banner_draw();
-    alexa_confirm_draw();
-    if (ov_before || alexa_overlay_active()) ui_mark_dirty_full();
 
     /* PART 10.6 app switcher (L3) + PART 10.1 safety overlay (L5, top) */
     if (ctx->switch_open) {

@@ -18,7 +18,6 @@
 #include "ui_drive_cockpit.h"
 #include "mic_in.h"   /* PART 8: DIAG VU meter */
 #include "img_bank.h" /* PART 6: boot logo + bg */
-#include "alexa_bridge.h" /* PART 10: QCC profile name */
 #include "notif.h"    /* PART 10.3 Notification Center */
 #include "net_wifi.h" /* PART 10: connectivity window */
 #include "snd_bank.h" /* standby: first-sync ding */
@@ -162,6 +161,12 @@ static void sb_str_upper(char *s)
 
 void os_scr_standby(os_ctx_t *ctx, uint32_t now)
 {
+    /* LAG FIX Oct 2026: clock needs 4 FPS max (colon blink); skip rest. */
+    {
+        static uint32_t s_last = 0;
+        if ((int32_t)(now - s_last) < 250) { ui_clear_dirty(); return; }
+        s_last = now;
+    }
     (void)ctx;
     gfx_clear(SB_BG);
     bool synced = net_wifi_time_synced();
@@ -284,7 +289,7 @@ static const char *s_home_labels_p0[9] = {
     "DRIVE", "SNAKE", "SETTINGS", "GAMES", "DIAG", "RADAR", "ROOF", "TRIP", "NOTIFY"
 };
 static const char *s_home_labels_p1[9] = {
-    "OLED", "GRAPHS", "SCORE", "LINK", "VOICE", "CLOCK", "", "", ""
+    "OLED", "GRAPHS", "SCORE", "LINK", "CLOCK", "", "", "", ""
 };
 static const ui_icon_t s_home_icons_p0[9] = {
     UI_ICON_DRIVE, UI_ICON_SCREEN, UI_ICON_GEAR,
@@ -293,8 +298,8 @@ static const ui_icon_t s_home_icons_p0[9] = {
 };
 static const ui_icon_t s_home_icons_p1[9] = {
     UI_ICON_SCREEN, UI_ICON_GRAPH, UI_ICON_SPARK,
-    UI_ICON_AUTO, UI_ICON_WARN, UI_ICON_OK,
-    UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK
+    UI_ICON_AUTO, UI_ICON_OK,
+    UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK
 };
 
 static void home_card_value(int slot, uint8_t page, char *out, size_t n)
@@ -330,9 +335,8 @@ static void home_card_value(int slot, uint8_t page, char *out, size_t n)
             snprintf(out, n, "%u %c", (unsigned)sn.drive_score, sn.drive_grade);
             break;
         }
-        case 3: snprintf(out, n, "%s", alexa_mqtt_connected() ? "MQTT UP" : (net_wifi_up() ? "WIFI" : "OFF")); break;
-        case 4: snprintf(out, n, "%s", alexa_profile_name()); break;
-        case 5: snprintf(out, n, "IDLE"); break;
+        case 3: snprintf(out, n, "%s", net_wifi_up() ? "WIFI" : "OFF"); break;
+        case 4: snprintf(out, n, "IDLE"); break;
         default: snprintf(out, n, "OPEN"); break;
         }
     }
@@ -351,9 +355,23 @@ void os_scr_home(const os_ctx_t *ctx, uint32_t now)
     }
     uint32_t anim = now - s_chg_ms;
 
+    /* LAG FIX Oct 2026: cards were marked dirty every frame (full 30 ms
+       push at 30 FPS). Redraw on selection anim + 2 Hz value refresh. */
+    {
+        static uint32_t s_last = 0;
+        static uint8_t s_page = 0xFF;
+        bool page_chg = (s_page != ctx->home_page);
+        s_page = ctx->home_page;
+        if (anim >= 250 && !page_chg && (int32_t)(now - s_last) < 500) {
+            ui_clear_dirty();
+            return;
+        }
+        s_last = now;
+    }
+
     const char *const *labels = ctx->home_page ? s_home_labels_p1 : s_home_labels_p0;
     const ui_icon_t *icons = ctx->home_page ? s_home_icons_p1 : s_home_icons_p0;
-    const int ntiles = ctx->home_page ? 6 : 9;   /* p1: no spare tiles */
+    const int ntiles = ctx->home_page ? 5 : 9;   /* p1: no spare tiles */
     for (int i = 0; i < ntiles; i++) {
         int col = i % 3, row = i / 3;
         int x = 8 + col * 103, y = 34 + row * 64, w = 98, h = 52;
@@ -492,9 +510,9 @@ static void draw_quick_overlay(const os_ctx_t *ctx)
                                 on ? RGB565(20, 12, 0) : UI_MUTED);
         }
     }
-    /* rows 1..4: sliders / selectors */
-    static const char *rnames[4] = { "BRIGHT", "VOLUME", "THEME", "PROFILE" };
-    for (int r = 1; r <= 4; r++) {
+    /* rows 1..3: sliders / selectors */
+    static const char *rnames[3] = { "BRIGHT", "VOLUME", "THEME" };
+    for (int r = 1; r <= 3; r++) {
         int ry = y + 56 + (r - 1) * 22;
         bool foc = ((int)ctx->quick_row == r);
         if (foc) { gfx_rect(x + 4, ry, w - 8, 20, UI_SURFACE_2); }
@@ -510,10 +528,8 @@ static void draw_quick_overlay(const os_ctx_t *ctx)
             uint8_t v = car_get_setting(1);
             snprintf(vb, sizeof(vb), "%u%%", (unsigned)v);
             ui_progress(x + 108, ry + 4, 100, 12, v, 100, UI_DATA);
-        } else if (r == 3) {
-            snprintf(vb, sizeof(vb), "%s", ui_cockpit_theme_name(ctx->cockpit_theme));
         } else {
-            snprintf(vb, sizeof(vb), "%s", alexa_profile_name());
+            snprintf(vb, sizeof(vb), "%s", ui_cockpit_theme_name(ctx->cockpit_theme));
         }
         gfx_text_right(x + w - 12, ry + 3, vb, vc, bg, 2);
     }
@@ -962,7 +978,13 @@ static void plot_card(int x, int y, int w, int h, const int16_t *hist,
 
 void os_scr_analytics(const os_ctx_t *ctx, uint32_t now)
 {
-    (void)now;
+    /* LAG FIX Oct 2026: history updates at 10 Hz; skip extra full pushes.
+       (Caller pre-marked dirty — clear it so the unchanged frame is skipped.) */
+    {
+        static uint32_t s_last = 0;
+        if ((int32_t)(now - s_last) < 100) { ui_clear_dirty(); return; }
+        s_last = now;
+    }
     gfx_clear(UI_BG);
     ui_draw_topbar(ctx);
 
@@ -997,6 +1019,12 @@ static const char *s_diag_tabs[DIAG_TABS] = { "SYSTEM", "SENSORS", "CONTROL", "D
 
 void os_scr_diag(const os_ctx_t *ctx, uint32_t now)
 {
+    /* LAG FIX Oct 2026: mostly static text (uptime 1/s); 2 FPS is plenty. */
+    {
+        static uint32_t s_last = 0;
+        if ((int32_t)(now - s_last) < 500) { ui_clear_dirty(); return; }
+        s_last = now;
+    }
     gfx_clear(UI_BG);
     ui_draw_topbar(ctx);
 
@@ -1172,7 +1200,15 @@ static const char *s_hud_layout_names[3] = { "FULL", "COMPACT", "NIGHT" };
 
 void os_scr_settings(const os_ctx_t *ctx, uint32_t now)
 {
-    (void)now;
+    /* LAG FIX: 10 FPS enough (D-pad repeat is 90 ms); skip extra pushes. */
+    {
+        static uint32_t s_last = 0;
+        static uint8_t s_sel = 0xFF;
+        bool chg = (s_sel != ctx->settings_sel);
+        s_sel = ctx->settings_sel;
+        if (!chg && (int32_t)(now - s_last) < 100) { ui_clear_dirty(); return; }
+        s_last = now;
+    }
     gfx_clear(UI_BG);
     ui_draw_topbar(ctx);
 
@@ -1358,7 +1394,12 @@ static void oled_preview(uint8_t layout, const os_ctx_t *ctx)
 
 void os_scr_oledctrl(const os_ctx_t *ctx, uint32_t now)
 {
-    (void)now;
+    /* LAG FIX: static preview; redraw on 4 FPS cadence. */
+    {
+        static uint32_t s_last = 0;
+        if ((int32_t)(now - s_last) < 250) { ui_clear_dirty(); return; }
+        s_last = now;
+    }
     gfx_clear(UI_BG);
     ui_draw_topbar(ctx);
 
@@ -1410,7 +1451,15 @@ static const char *const s_game_nums[OS_GAME_COUNT] = { "1", "2" };
 
 void os_scr_gameshub(const os_ctx_t *ctx, uint32_t now)
 {
-    (void)now;
+    /* LAG FIX: static carousel; redraw on selection change + 4 FPS. */
+    {
+        static uint32_t s_last = 0;
+        static uint8_t s_sel = 0xFF;
+        bool chg = (s_sel != ctx->game_sel);
+        s_sel = ctx->game_sel;
+        if (!chg && (int32_t)(now - s_last) < 250) { ui_clear_dirty(); return; }
+        s_last = now;
+    }
     gfx_clear(UI_BG);
     ui_draw_topbar(ctx);
 
@@ -1448,6 +1497,12 @@ static uint16_t notif_col(notif_cat_t c)
 
 void os_scr_score(const os_ctx_t *ctx, uint32_t now)
 {
+    /* LAG FIX: quasi-static window; 2 FPS. */
+    {
+        static uint32_t s_last = 0;
+        if ((int32_t)(now - s_last) < 500) { ui_clear_dirty(); return; }
+        s_last = now;
+    }
     (void)ctx; (void)now;
     gfx_clear(UI_BG);
     ui_draw_topbar(ctx);
@@ -1476,7 +1531,12 @@ void os_scr_score(const os_ctx_t *ctx, uint32_t now)
 
 void os_scr_trip(const os_ctx_t *ctx, uint32_t now)
 {
-    (void)now;
+    /* LAG FIX: time changes 1/s; 2 FPS. */
+    {
+        static uint32_t s_last = 0;
+        if ((int32_t)(now - s_last) < 500) { ui_clear_dirty(); return; }
+        s_last = now;
+    }
     gfx_clear(UI_BG);
     ui_draw_topbar(ctx);
     char b[32];
@@ -1492,7 +1552,7 @@ void os_scr_trip(const os_ctx_t *ctx, uint32_t now)
     snprintf(b, sizeof(b), "MAX TILT %.0f   BUMPS %u", (double)trip_max_tilt(),
              (unsigned)trip_hard_bumps());
     gfx_text_medium(14, 156, b, UI_TEXT);
-    snprintf(b, sizeof(b), "ODO %u m", (unsigned)alexa_odo_m());
+    snprintf(b, sizeof(b), "ODO %u m (est)", (unsigned)trip_dist_m());
     gfx_text_medium(14, 182, b, UI_TEXT_2);
     gfx_text_center_box(0, 200, 320, "A: RESET TRIP", UI_FONT_SMALL, UI_ACCENT);
     ui_draw_bottombar("A:RESET B:BACK", "TRIP");
@@ -1500,6 +1560,12 @@ void os_scr_trip(const os_ctx_t *ctx, uint32_t now)
 
 void os_scr_conn(const os_ctx_t *ctx, uint32_t now)
 {
+    /* LAG FIX: quasi-static window; 2 FPS. */
+    {
+        static uint32_t s_last = 0;
+        if ((int32_t)(now - s_last) < 500) { ui_clear_dirty(); return; }
+        s_last = now;
+    }
     (void)now;
     gfx_clear(UI_BG);
     ui_draw_topbar(ctx);
@@ -1529,8 +1595,8 @@ void os_scr_conn(const os_ctx_t *ctx, uint32_t now)
     snprintf(b, sizeof(b), "WIFI         %s",
              net_wifi_up() ? "UP" : "DOWN");
     gfx_text_medium(x, y, b, net_wifi_up() ? UI_OK : UI_MUTED); y += 26;
-    snprintf(b, sizeof(b), "MQTT         %s", alexa_mqtt_connected() ? "UP" : "DOWN");
-    gfx_text_medium(x, y, b, alexa_mqtt_connected() ? UI_OK : UI_MUTED);
+    snprintf(b, sizeof(b), "TIME         %s", net_wifi_time_synced() ? "SYNCED" : "...");
+    gfx_text_medium(x, y, b, net_wifi_time_synced() ? UI_OK : UI_MUTED);
     ui_draw_bottombar("B:BACK", "CONNECT");
 }
 
@@ -1538,7 +1604,12 @@ static uint8_t s_notif_scroll;
 
 void os_scr_notif(const os_ctx_t *ctx, uint32_t now)
 {
-    (void)ctx; (void)now;
+    /* LAG FIX: list scrolls on input; 4 FPS cadence otherwise. */
+    {
+        static uint32_t s_last = 0;
+        if ((int32_t)(now - s_last) < 250) { ui_clear_dirty(); return; }
+        s_last = now;
+    }
     gfx_clear(UI_BG);
     ui_draw_topbar(ctx);
     gfx_text_small(UI_GAP_S, UI_CONTENT_TOP + 2, "NOTIFICATIONS", UI_MUTED);
@@ -1659,12 +1730,12 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
     {
         static const char *chips[] = {
             "OFF", "MENU", "READY", "INTRO", "PLAY", "PAUSE",
-            "CRASH", "LEVEL UP", "OVER"
+            "CRASH", "RETRY", "LEVEL UP", "OVER"
         };
-        const char *chip = s.state < 9 ? chips[s.state] : "?";
+        const char *chip = s.state < 10 ? chips[s.state] : "?";
         uint16_t cc = (s.state == 4) ? UI_OK :
                       (s.state == 6) ? UI_DANGER :
-                      (s.state == 8) ? UI_WARNING : UI_DATA;
+                      (s.state == 9) ? UI_WARNING : UI_DATA;
         gfx_rect(8, 4, 170, 20, UI_SURFACE);
         gfx_text_small(14, 9, "MATRIX SNAKE", UI_TEXT);
         gfx_rect(214, 4, 98, 20, UI_SURFACE_2);
@@ -1770,8 +1841,12 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
             if (bon) {
                 gfx_text_small(12, 182, "BONUS", UI_WARNING);
                 ui_progress(70, 182, 100, 8, bms, 7000, UI_WARNING);
-            } else if (s.state == 7) {
-                gfx_text_small(12, 182, "LEVEL CLEAR", UI_OK);
+            } else if (s.state == 8) {
+                gfx_text_small(12, 182, s.winfx ? "BOARD FULL!" : "LEVEL CLEAR", UI_OK);
+            } else if (s.state == 6 || s.state == 7) {
+                char lb[24];
+                snprintf(lb, sizeof(lb), "LIFE LOST  %d LEFT", s.lives);
+                gfx_text_small(12, 182, lb, UI_DANGER);
             } else if (s.new_hi) {
                 gfx_text_small(12, 182, "NEW HI-SCORE!", UI_WARNING);
             }
@@ -1779,14 +1854,21 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
         }
         p_newhi = s.new_hi;
     }
-    /* stats row */
-    if (full || p_len != s.len || p_step != s.step_ms || p_rum != s.rumble_mode) {
+    /* stats row (OVER shows death reason) */
+    if (full || p_len != s.len || p_step != s.step_ms || p_rum != s.rumble_mode ||
+        p_state == 9 || s.state == 9) {
         p_len = s.len; p_step = s.step_ms; p_rum = s.rumble_mode;
         char b[48];
         static const char *rm[3] = { "OFF", "SOFT", "FULL" };
-        float sps = s.step_ms ? 1000.0f / s.step_ms : 0;
-        snprintf(b, sizeof(b), "LEN %d  SPD %.1f/s  RUMBLE %s",
-                 s.len, (double)sps, rm[s.rumble_mode % 3]);
+        if (s.state == 9) {
+            static const char *dr[] = { "", "WALL", "SELF", "MINE" };
+            const char *d = s.death_reason < 4 ? dr[s.death_reason] : "?";
+            snprintf(b, sizeof(b), "DIED: %s  SCORE %lu", d, (unsigned long)s.score);
+        } else {
+            float sps = s.step_ms ? 1000.0f / s.step_ms : 0;
+            snprintf(b, sizeof(b), "LEN %d  SPD %.1f/s  RUMBLE %s",
+                     s.len, (double)sps, rm[s.rumble_mode % 3]);
+        }
         gfx_rect(8, 198, 304, 16, UI_BG);
         gfx_text_small(12, 201, b, UI_TEXT_2);
         ui_mark_dirty(8, 198, 304, 16);
@@ -1796,7 +1878,8 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
         const char *f = (s.state == 1) ? "UP/DN LVL  START PLAY" :
                         (s.state == 4) ? "START PAUSE  BACK HOLD EXIT" :
                         (s.state == 5) ? "START RESUME  BACK HOLD EXIT" :
-                        (s.state == 8) ? "START RETRY  BACK MENU" :
+                        (s.state == 7) ? "GET READY" :
+                        (s.state == 9) ? "START RETRY  BACK MENU" :
                         (s.state == 0) ? "" : "BACK HOLD EXIT";
         static char pf[40] = {0};
         if (full || strcmp(pf, f)) {

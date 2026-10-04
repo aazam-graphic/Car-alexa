@@ -31,7 +31,7 @@ uint32_t serpent_hiscore(void);
 
 /* arcade state for OLED gating / stats (ARC_* as uint8) */
 uint8_t serpent_arcade_state(void);
-/* true in COUNTDOWN/INTRO/PLAY/DYING/CLEAR: skip periodic OLED redraw */
+/* true in COUNTDOWN/INTRO/PLAY/DYING/RETRY/CLEAR: skip periodic OLED redraw */
 bool serpent_suppress_oled(void);
 
 /* per-loop game progression (steps/timers/renders). Caller-independent:
@@ -51,6 +51,7 @@ typedef struct {
     uint16_t bonus_ms_left;
     uint8_t  best_level, lives;
     uint8_t  fw, fh;                 /* matrix field (12x10 / 10x12) */
+    uint8_t  winfx;                  /* WIN_BOARD wipe active */
     uint8_t  frame_rgb[120][3];   /* logical index order */
     uint32_t mirror_dirty[4];     /* 120-bit, reader clears after redraw */
 } serpent_status_t;

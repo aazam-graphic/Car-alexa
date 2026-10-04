@@ -378,6 +378,7 @@ static void start_level(uint8_t lv, uint32_t now, bool fresh_run)
     s_g.dead_why = DEAD_NONE;
     s_g.bonus_on = false;
     s_g.patrol_on = false;
+    s_g.winfx = false;
     s_g.food.x = -1; s_g.food.y = -1;
     for (int i = 0; i < 120; i++) s_g.occ[i] = 0;
     for (int y = 0; y < FH; y++)
@@ -713,6 +714,18 @@ static void render_dying(uint32_t now)
 static void render_clear(uint32_t now)
 {
     if (car_get_mx_fx() == 0) { snk_clear(); matrix_show(); return; }
+    if (s_g.winfx) {   /* WIN_BOARD rainbow */
+        int ph = (int)((now / 120) % 6);
+        static const rgb_t rb[6] = {
+            {220,0,0},{255,150,0},{255,255,0},{0,180,35},{0,110,180},{130,0,180}
+        };
+        snk_clear();
+        for (int y = 0; y < FH; y++)
+            for (int x = 0; x < FW; x++)
+                snk_px(x, y, rb[(x + y + ph) % 6]);
+        matrix_show();
+        return;
+    }
     uint32_t row = (now - s_fx_t0) / 40;   /* green wipe top->bottom */
     snk_clear();
     for (uint32_t y = 0; y < row && y < 10; y++)
@@ -781,7 +794,7 @@ static void exit_full(uint32_t now)
     input_flush_context_switch();   /* game-held buttons must not leak out */
     /* hub-launched game: back to hub (HOME path stays where it was) */
     {
-        os_ctx_t *oc = alexa_os_ctx();
+        os_ctx_t *oc = car_os_ctx();
         if (oc && oc->state == OS_GAME_3)
             os_request_screen(oc, OS_GAMES_HUB, now);
     }
@@ -813,6 +826,7 @@ static void level_clear(uint32_t now)
 {
     const sp_level_t *L = sp_level(s_g.level);
     uint32_t bonus = 50u * s_g.level;
+    if (s_g.winfx) bonus += 500u * s_g.level;   /* WIN_BOARD */
     s_g.score += bonus;
     car_sfx_score();
     rb_levelup();
@@ -881,7 +895,8 @@ uint8_t serpent_arcade_state(void) { return (uint8_t)s_arc; }
 bool serpent_suppress_oled(void)
 {
     return s_arc == ARC_COUNTDOWN || s_arc == ARC_INTRO ||
-           s_arc == ARC_PLAY || s_arc == ARC_DYING || s_arc == ARC_CLEAR;
+           s_arc == ARC_PLAY || s_arc == ARC_DYING || s_arc == ARC_RETRY ||
+           s_arc == ARC_CLEAR;
 }
 
 /* Per-loop game progression (B+): steps/timers/renders. Caller-independent —
@@ -889,6 +904,7 @@ bool serpent_suppress_oled(void)
 void serpent_arcade_tick(uint32_t now)
 {
     s_tick_now = now;
+    matrix_set_dim_pct(s_arc == ARC_PAUSED ? 25 : 100);   /* pause dim */
     switch (s_arc) {
     case ARC_MENU:
         if ((int32_t)(now - s_last_render) >= 33) {
@@ -950,6 +966,7 @@ void serpent_arcade_tick(uint32_t now)
                     else rb_crash();
                     break;
                 }
+                if (s_g.winfx) { level_clear(now); break; }   /* WIN_BOARD */
                 if (!s_g.endless && s_g.food_in_level >= L->food_target &&
                     s_g.food_in_level != fil_before) {
                     level_clear(now);
@@ -997,12 +1014,21 @@ void serpent_arcade_tick(uint32_t now)
                 uint16_t sm = s_g.step_ms;
                 start_level(s_g.level, now, false);  /* score/practice kept */
                 if (en) { s_g.endless = true; s_g.step_ms = sm; }
-                s_arc = ARC_COUNTDOWN;
+                s_arc = ARC_RETRY;   /* digits + lives dots, then INTRO */
                 s_state_t0 = now;
-                s_cd_step = 99;
             } else {
                 game_over(now, false);
             }
+        }
+        break;
+    case ARC_RETRY:
+        if ((int32_t)(now - s_last_render) >= 33) {
+            s_last_render = now;
+            render_intro();   /* level digits + lives dots */
+        }
+        if (now - s_state_t0 >= 1000) {
+            s_arc = ARC_INTRO;
+            s_state_t0 = now;
         }
         break;
     case ARC_CLEAR:
@@ -1063,6 +1089,7 @@ void serpent_arcade_get_status(serpent_status_t *out)
     out->lives = s_g.lives;
     out->fw = matrix_field_w();
     out->fh = matrix_field_h();
+    out->winfx = s_g.winfx ? 1 : 0;
     for (int i = 0; i < 120; i++) {
         out->frame_rgb[i][0] = s_mirror[i][0];
         out->frame_rgb[i][1] = s_mirror[i][1];

@@ -59,7 +59,6 @@
 #include "oled_driver.h"
 #include "imu_driver.h"
 #include "imu_adv.h"
-#include "alexa_bridge.h"
 #include "snd_bank.h"
 #include "mic_in.h"
 #include "img_bank.h"   /* PART 6: late-init image preload */
@@ -1425,7 +1424,6 @@ static void imu_events_handle(uint32_t now)
             os_alert(&s_os, ALERT_OBSTACLE, "TILT CRITICAL", now);
             if (!snd_play("sys_warning")) car_sfx_bad();
             notif_push(NOTIF_MPU, "TILT CRITICAL - motors cut", now);
-            alexa_announce("Attention - car exceeded critical tilt, motors stopped automatically.", true);
             rumble_preset(RUMBLE_TILT);
             ESP_LOGE(TAG, "TILT_CRITICAL %.1f deg - motors cut", (double)e.mag);
             break;
@@ -1457,8 +1455,7 @@ static void imu_events_handle(uint32_t now)
             snd_play("impact_hard");
             notif_push(NOTIF_MPU, "HARD IMPACT", now);
             rumble_preset(RUMBLE_IMPACT_H);
-            alexa_impact_note(3, e.mag, now);
-            ESP_LOGE(TAG, "impact HARD %.2fg (logged + Alexa announce)", (double)e.mag);
+            ESP_LOGE(TAG, "impact HARD %.2fg (logged)", (double)e.mag);
             break;
         case IMU_EVT_FREEFALL:
             /* motors cut during airtime (gating via imu_adv_motors_cut) */
@@ -1481,15 +1478,12 @@ static void imu_events_handle(uint32_t now)
                 if (!snd_play("landing_smooth")) car_sfx_score();
                 rumble_preset(RUMBLE_LAND_S);
             }
-            {   /* PART 9.5: airborne announce with measured airtime */
+            {   /* PART 9.5: airborne log with measured airtime */
                 imu_adv_snap_t asnap;
                 imu_adv_snapshot(&asnap);
                 if (asnap.last_airtime_ms) {
-                    char msg[80];
-                    snprintf(msg, sizeof(msg),
-                             "Attention - car went airborne for %lu milliseconds, landed safely.",
+                    ESP_LOGI(TAG, "airborne %lu ms",
                              (unsigned long)asnap.last_airtime_ms);
-                    alexa_announce(msg, false);
                 }
             }
             ESP_LOGI(TAG, "landing %s %.2fg (score logged)",
@@ -1516,7 +1510,6 @@ static void imu_events_handle(uint32_t now)
             cockpit_toast("STUCK - ESCAPING", now);
             snd_play("stuck_alert");
             notif_push(NOTIF_MPU, "STUCK - escaping", now);
-            alexa_announce("Attention - wheels are stuck, car is attempting to escape.", false);
             rumble_preset(RUMBLE_STUCK);
             ESP_LOGE(TAG, "STUCK: measured <10%% expected - AUTO escape now");
             if (g.mode == MODE_AUTO && g.ast != AST_STUCK) {

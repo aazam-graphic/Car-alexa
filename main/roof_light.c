@@ -185,7 +185,7 @@ void roof_light_update(uint32_t now)
        estop and disconnect stay dark. */
     input_context_t ctx = os_context();
     bool preview = false;
-    os_ctx_t *oc = alexa_os_ctx();
+    os_ctx_t *oc = car_os_ctx();
     if (oc && (oc->roof_panel || oc->quick_open)) preview = true;
     if (!s_rl.enabled || (ctx != INPUT_CTX_DRIVE && !preview) ||
         g.estop || !xbox360_dongle_connected() || s_rl.brightness == 0) {

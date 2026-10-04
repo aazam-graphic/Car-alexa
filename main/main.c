@@ -24,7 +24,6 @@
 #include "usb/usb_host.h"
 #include "xbox360.h"
 #include "car.h"
-#include "alexa_bridge.h"
 
 static const char *TAG = "usb_host";
 
@@ -80,17 +79,6 @@ void app_main(void)
                                        16384,
                                        NULL,
                                        2,
-                                       NULL,
-                                       1);
-    assert(created == pdTRUE);
-
-    /* Alexa cloud bridge: WiFi + MQTT/TLS + safety gateway. Starts its own
-       net stack; disabled (sleeping) until a broker is configured. */
-    created = xTaskCreatePinnedToCore(alexa_task,
-                                       "alexa",
-                                       16384,
-                                       NULL,
-                                       1,
                                        NULL,
                                        1);
     assert(created == pdTRUE);

@@ -44,7 +44,6 @@ typedef enum {
     OS_GAME_4,
     OS_GAME_5,
     OS_GAME_6,
-    OS_ALEXA_LOG,      /* Alexa voice history (blueprint §9B) */
     OS_SCORE,          /* PART 10: Drive Score window */
     OS_TRIP,           /* PART 10: Trip computer */
     OS_CONN,           /* PART 10: Connectivity */
@@ -216,10 +215,9 @@ void os_init(os_ctx_t *ctx);
 void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, uint32_t now);
 void os_update(os_ctx_t *ctx, uint32_t now);
 
-/* ---- Alexa bridge entry points (called from alexa_bridge, car_task ctx) -- */
+/* ---- Car task context accessor (was alexa_os_ctx; Alexa removed Oct 2026) -- */
 void      os_request_screen(os_ctx_t *ctx, int st, uint32_t now);
-void      os_alexa_save_settings(os_ctx_t *ctx);
-os_ctx_t *alexa_os_ctx(void);
+os_ctx_t *car_os_ctx(void);
 
 void os_draw_tft(os_ctx_t *ctx, uint32_t now);
 void os_draw_oled(os_ctx_t *ctx, uint32_t now);
