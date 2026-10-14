@@ -1,4 +1,4 @@
-/*
+﻿/*
  * car.c - Redgear Pro gamepad controlled robot car (ESP32-S3)
  *
  * Features:
@@ -9,7 +9,7 @@
  *    gripper/spoiler servos REMOVED (hardware removed)
  *  - Lights: headlight relay (46), backlight relay (14), rear light relay (3),
  *    roof WS2812 police light (18, roof_light.c), WS2812 rear+under strip (6),
- *    front WS2812 LEDs (17/15) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â modes: off/static/rainbow/chase/siren,
+ *    front WS2812 LEDs (17/15) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â modes: off/static/rainbow/chase/siren,
  *    indicators, hazard
  *  - 3x HC-SR04 ultrasonic (left/front/right): parking beeps, obstacle
  *    speed limit, emergency stop, auto mode avoidance + stuck escape
@@ -81,13 +81,13 @@ static const char *TAG = "car";
 /* gripper + spoiler servos REMOVED (hardware removed, pins freed):
    GPIO 6 = rear WS2812 strip, GPIO 7 = front US trig.
    servo_deg() ignores ch2/ch3 so old calls become safe no-ops. */
-/* PIN_M_IN1..ENB removed ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â motors now via UART D1 slave (pin 36)
+/* PIN_M_IN1..ENB removed ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â motors now via UART D1 slave (pin 36)
    Pins 15,17 reused for front WS2812 LEDs */
 #define PIN_HEADLIGHT      46  /* was 48 - relay active LOW - headlight (46 free after TFT SCLK -> 21) */
 #define PIN_BACKLIGHT_UNUSED 14  /* PART 8: body-backlight relay REMOVED in hardware;
                                     GPIO14 repurposed as MIC WS (I2S1). Do not drive. */
 /* NOTE: PIN_BATT_ADC was removed long ago (GPIO1 = motor UART TX now). */
-#define PIN_US_TRIG_L      12  /* LEFT trig (moved 8ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢12) */
+#define PIN_US_TRIG_L      12  /* LEFT trig (moved 8ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢12) */
 #define PIN_US_TRIG_R      8   /* RIGHT trig (keep on 8) */
 #define PIN_US_TRIG_F      7   /* FRONT trig (was 38 - 38 now TFT MOSI) */
 // REAR US removed - pins 44/40 + 14 freed (user request)
@@ -96,7 +96,7 @@ static const char *TAG = "car";
 #define PIN_US_ECHO_R      11
 #define PIN_LED_STRIP      6   /* rear indicator (was 21 - 21 now TFT SCLK) */
 /* Under-car strip: DAISY-CHAINED after rear strip on GPIO 6 (rear DOUT -> under DIN).
-   No dedicated GPIO ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â board pe free pin nahi bacha (22-25 module pe exist nahi,
+   No dedicated GPIO ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â board pe free pin nahi bacha (22-25 module pe exist nahi,
    26-37 flash/PSRAM, 43/44 console). UNDER_STRIP_NUM = 12 under LEDs. */
 #define PIN_I2S_BCLK       39  /* revert original */
 #define PIN_I2S_LRC        47
@@ -119,7 +119,7 @@ static const char *TAG = "car";
 // BATT_DIV removed - battery function removed
 
 #define LOOP_MS            40
-#define STICK_MAX          16000 /* typical stick ~ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±16000, not 32767 */
+#define STICK_MAX          16000 /* typical stick ~ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±16000, not 32767 */
 
 /* buttons B_* and modes MODE_* / AST_* now live in car_global.h (shared with Car OS) */
 
@@ -158,7 +158,7 @@ static uint16_t min3(uint16_t a, uint16_t b, uint16_t c)
 /* ---------------------------------------------------------------------------
  * PIN UNIQUENESS GUARD (added 2026-09-17 review)
  * Boot pe ek baar check karta hai ki koi GPIO do functions me nahi diya gaya.
- * Naya pin add karte waqt ye list update karo ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â duplicate hone par boot log
+ * Naya pin add karte waqt ye list update karo ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â duplicate hone par boot log
  * me clear ESP_LOGE milega (silent pin conflict se bachne ke liye).
  * NOTE: ESP32-S3 strapping pins jo is project me use ho rahe hain:
  *   GPIO0  (TFT DC)          - boot mode strap
@@ -235,7 +235,7 @@ static void roof_sync_to_storage(void)
     s_roof_col = rl->color_idx;
 }
 
-/* settings schema version ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â bump when defaults change so stale NVS values
+/* settings schema version ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â bump when defaults change so stale NVS values
    get replaced instead of persisted. v4: PART 7 roof modes + POLICE default. */
 #define SETTINGS_VER  6
 
@@ -279,7 +279,7 @@ static void settings_nvs_load(void)
     bool gears_valid = false;
     if (nvs_get_u32(h, "ver", &ver) != ESP_OK || ver != SETTINGS_VER) {
         /* v6+: never wipe user data on schema bump (only log + migrate above) */
-        ESP_LOGI(TAG, "settings schema v%u != NVS v%u ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â keeping saved values",
+        ESP_LOGI(TAG, "settings schema v%u != NVS v%u ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â keeping saved values",
                  SETTINGS_VER, ver);
     }
     if (nvs_get_u32(h, "gears", &v) == ESP_OK) {
@@ -639,7 +639,7 @@ static void strip_update(uint32_t now)
     uint16_t blink = (now / 500) & 1;          /* indicator blink 1Hz */
     uint16_t fast = (now / 150) & 1;           /* siren/strobe 3.3Hz */
     bool sig_l = g.sig_l, sig_r = g.sig_r;
-    /* auto indicators already set by auto_logic() ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â no override needed */
+    /* auto indicators already set by auto_logic() ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â no override needed */
 
     /* Front LEDs control (dedicated separate pins 17 and 15) */
     {
@@ -798,6 +798,11 @@ static void strip_update(uint32_t now)
    (horn/siren/beep) on top. State car_task set karta hai, audio task render
    karta hai. BCLK=39 LRC=47 DIN=40 (GPIO35 = octal PSRAM pin, N16R8), SD -> 3V3. */
 
+/* Single source of truth for the mixer rate. tools/gen_sounds.py MUST emit
+   this same rate or the bank needs resampling again - the static assert below
+   catches a C-side change, the generator side is covered by gen_sounds.py. */
+#define CAR_AUDIO_RATE 22050
+
 static i2s_chan_handle_t s_i2s_tx;
 static volatile bool     s_audio_paused = false;   /* pause ke dauraan engine silent */
 
@@ -927,10 +932,17 @@ typedef struct {
 
 static wav_t s_eng, s_hov, s_brk, s_stp, s_shot, s_startup, s_horn_wav, s_intro_wav;
 static uint32_t s_startup_out, s_intro_out;
-/* PART 5 sound-bank voice (16kHz PCM, resampled in mixer like intro) */
+/* PART 5 sound-bank voice.
+   Was 16 kHz and resampled in the mixer with nearest-neighbour
+   (`ip = out * 16000 / 22050`), which duplicated ~27% of output samples and
+   left ~2.3x the image energy above 8 kHz - the "harsh/gritty" bank sounds.
+   tools/gen_sounds.py now emits 22050 Hz, so playback is a plain index with
+   no resampler at all. Keep this equal to the I2S rate below. */
 static wav_t s_snd;
 static uint32_t s_snd_out;
-#define SND_BANK_RATE 16000
+#define SND_BANK_RATE 22050
+_Static_assert(SND_BANK_RATE == CAR_AUDIO_RATE,
+               "sound bank must be generated at the I2S rate (tools/gen_sounds.py SR)");
 static portMUX_TYPE s_wav_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static uint32_t s_ry_tick_until; /* RY (tilt) par indicator-style tick */
@@ -1029,7 +1041,7 @@ static void rumble_start_step(uint8_t i)
     s_seq_gap = false;
 }
 
-/* haptic: trigger rumble L/R (0-255) for ms duration ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â only if controller connected */
+/* haptic: trigger rumble L/R (0-255) for ms duration ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â only if controller connected */
 static void rumble(uint8_t l, uint8_t r, uint32_t ms)
 {
     rumble_step_t one = { l, r, (uint16_t)ms, 0 };
@@ -1413,7 +1425,7 @@ static void audio_effect_update(uint32_t now)
     uint16_t amp = 5000;
 
     if (false && s_horn_on) {
-        /* old tone horn disabled ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â custom horn sample used */
+        /* old tone horn disabled ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â custom horn sample used */
         freq = ((now / 130) & 1) ? 620 : 880;
         until = now + 200;
         amp = 6000;
@@ -1505,7 +1517,7 @@ static void audio_effect_update(uint32_t now)
     }
 
     /* master silence: MUTE chip or E-STOP kills scheduled tones
-       (bank voices like sys_estop still play ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â they bypass this) */
+       (bank voices like sys_estop still play ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â they bypass this) */
     if (g.snd_mute || g.estop) { freq = 0; until = now; amp = 0; }
 
     s_effect_freq = freq;
@@ -1515,7 +1527,7 @@ static void audio_effect_update(uint32_t now)
 
 static void audio_render(int16_t *buf, size_t n)
 {
-    const float dt = 1.0f / 22050.0f;
+    const float dt = 1.0f / (float)CAR_AUDIO_RATE;
     static float ph_x = 0.0f;
     static uint32_t lcg = 12345;
     uint32_t now = now_ms();
@@ -1654,14 +1666,14 @@ static void audio_render(int16_t *buf, size_t n)
             if (loc_horn.d) { s += ((int16_t *)loc_horn.d)[ip] * loc_horn.vol * 2 / 1000; loc_horn.pos += 65536; }
         }
         if (loc_intro.d) {
-            uint32_t out_total = (uint32_t)((uint64_t)loc_intro.len / 2 * 22050 / INTRO_TEST_SOUND_RATE);
+            uint32_t out_total = (uint32_t)((uint64_t)loc_intro.len / 2 * CAR_AUDIO_RATE / INTRO_TEST_SOUND_RATE);
             if (loc_s_intro_out >= out_total) {
                 if (loc_intro.loop) loc_s_intro_out = 0;
                 else { loc_intro.d = NULL; loc_s_intro_out = 0; }
             }
             if (loc_intro.d) {
                 uint32_t nsp_i = loc_intro.len / 2;
-                uint32_t ip = (uint32_t)((uint64_t)loc_s_intro_out * INTRO_TEST_SOUND_RATE / 22050);
+                uint32_t ip = (uint32_t)((uint64_t)loc_s_intro_out * INTRO_TEST_SOUND_RATE / CAR_AUDIO_RATE);
                 if (ip >= nsp_i) ip = nsp_i ? nsp_i - 1 : 0; /* clamp: rounding can push ip == nsp on last sample */
                 int32_t smp = ((int16_t *)loc_intro.d)[ip];
                 s += smp * loc_intro.vol * 2 / 1000;
@@ -1669,11 +1681,11 @@ static void audio_render(int16_t *buf, size_t n)
             }
         }
         if (loc_startup.d) {
-            uint32_t out_total = (uint32_t)((uint64_t)loc_startup.len / 2 * 22050 / STARTUP_SOUND_RATE);
+            uint32_t out_total = (uint32_t)((uint64_t)loc_startup.len / 2 * CAR_AUDIO_RATE / STARTUP_SOUND_RATE);
             if (loc_s_startup_out >= out_total) { loc_startup.d = NULL; loc_s_startup_out = 0; }
             else {
                 uint32_t nsp_s = loc_startup.len / 2;
-                uint32_t ip = (uint32_t)((uint64_t)loc_s_startup_out * STARTUP_SOUND_RATE / 22050);
+                uint32_t ip = (uint32_t)((uint64_t)loc_s_startup_out * STARTUP_SOUND_RATE / CAR_AUDIO_RATE);
                 if (ip >= nsp_s) ip = nsp_s ? nsp_s - 1 : 0; /* clamp: rounding can push ip == nsp on last sample */
                 int32_t smp = ((int16_t *)loc_startup.d)[ip];
                 s += smp * loc_startup.vol * 2 / 1000;
@@ -1681,15 +1693,11 @@ static void audio_render(int16_t *buf, size_t n)
             }
         }
         bool startup_active = (loc_startup.d != NULL);
-        if (loc_snd.d) {   /* PART 5 bank voice: 16kHz -> 22050 resample */
-            uint32_t out_total = (uint32_t)((uint64_t)loc_snd.len / 2 * 22050 / SND_BANK_RATE);
-            if (loc_s_snd_out >= out_total) { loc_snd.d = NULL; loc_s_snd_out = 0; }
+        if (loc_snd.d) {   /* PART 5 bank voice: native 22050 Hz, NO resampling */
+            uint32_t nsp_b = loc_snd.len / 2;
+            if (loc_s_snd_out >= nsp_b) { loc_snd.d = NULL; loc_s_snd_out = 0; }
             else {
-                uint32_t nsp_b = loc_snd.len / 2;
-                uint32_t ip = (uint32_t)((uint64_t)loc_s_snd_out * SND_BANK_RATE / 22050);
-                if (ip >= nsp_b) ip = nsp_b ? nsp_b - 1 : 0;
-                int32_t smp = ((int16_t *)loc_snd.d)[ip];
-                s += smp * loc_snd.vol * 2 / 1000;
+                s += ((int16_t *)loc_snd.d)[loc_s_snd_out] * loc_snd.vol * 2 / 1000;
                 loc_s_snd_out++;
             }
         }
@@ -1800,7 +1808,7 @@ static void audio_init(void)
     ESP_ERROR_CHECK(i2s_new_channel(&ac, &s_i2s_tx, NULL));
 
     i2s_std_config_t sc = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(22050),
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(CAR_AUDIO_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
@@ -1829,7 +1837,7 @@ static void audio_init(void)
 
 /* ------------------------------ input/keys ------------------------------ */
 
-/* ------------------------- AUTO helpers (guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§13) ----------------------- */
+/* ------------------------- AUTO helpers (guide ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§13) ----------------------- */
 static bool auto_can_enter(const xbox360_pad_t *pad)
 {
     if (g.estop) return false;
@@ -1882,7 +1890,7 @@ static void auto_exit(uint32_t now)
     ESP_LOGI(TAG, "AUTO exited (manual)");
 }
 
-/* premium guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4: clear e-stop only via START+BACK hold 2s + LT held +
+/* premium guide ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4: clear e-stop only via START+BACK hold 2s + LT held +
    stationary. No single-button clear. */
 static void estop_input_handle(const xbox360_pad_t *pad, uint32_t now)
 {
@@ -1912,7 +1920,7 @@ static void estop_input_handle(const xbox360_pad_t *pad, uint32_t now)
 }
 /* ============================== input/keys ================================ */
 
-/* Neutral-release lock (premium guide ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½2.6/ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½12): after leaving OS/Game/E-stop
+/* Neutral-release lock (premium guide ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½2.6/ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½12): after leaving OS/Game/E-stop
    the car stays drive-locked until BOTH sticks and BOTH triggers read neutral
    continuously for 250 ms. Motors are forced to 0 while locked. */
 static bool     s_drive_locked  = false;
@@ -1930,20 +1938,20 @@ uint16_t car_last_dig(void) { return s_last_dig; }
 
 static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, uint32_t now)
 {
-    /* premium guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§14: unified semantic event layer first. */
+    /* premium guide ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§14: unified semantic event layer first. */
     input_events_update(dig, now);
 
-    /* AZAM CAR OS 9.0 Part 1 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â A/B meaning is 100% context-determined:
+    /* AZAM CAR OS 9.0 Part 1 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â A/B meaning is 100% context-determined:
        CLOCK_STANDBY: A/B dead (no-op) | DRIVE: A=headlight/mist/pass,
        B=roof/panel/cycle | OS/MENU: A=confirm, B=back | GAME: game-defined,
        B=exit | MODAL: A=confirm, B=cancel | ESTOP: A/B dead (GUIDE only).
-       9.0 Part 3 RULE 1: this switch is the SINGLE router ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â exactly one
+       9.0 Part 3 RULE 1: this switch is the SINGLE router ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â exactly one
        handler below ever sees a frame's events, so DRIVE logic can never
        observe a press made inside OS/GAME/BOOT/ESTOP (or future STANDBY). */
     /* arm the lock on every DRIVE re-entry (from OS/Game/Estop) + 9.0 RULE 2:
        ANY context change flushes in-flight button events (sticks already
        covered by the 250ms neutral-release lock below; this extends the
-       same principle to A/B/X/Y/D-pad/LB/RB ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â a held-through button gets
+       same principle to A/B/X/Y/D-pad/LB/RB ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â a held-through button gets
        no tap/hold/double/edge in the new context, only a fresh press). */
     {
         input_context_t ctx_now = os_context();
@@ -1955,7 +1963,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
                      (int)ctx_prev, (int)ctx_now);
             s_ctx_prev = ctx_now;
         }
-        /* entering CLOCK_IDLE: lock everything visibly OFF ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â lights,
+        /* entering CLOCK_IDLE: lock everything visibly OFF ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â lights,
            signals, roof, mist, horn, siren. (Motors/engine die via the
            parked gate.) The user re-enables lights with A/B/Y/D-pad. */
         if (ctx_now == INPUT_CTX_STANDBY && ctx_prev != INPUT_CTX_STANDBY) {
@@ -1984,7 +1992,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
     last_now = now;
     if (dt_ms > 100) dt_ms = 100;           /* clamp */
 
-    /* ==== PRIORITY 1 (guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§15): GUIDE tap = global e-stop toggle ========= */
+    /* ==== PRIORITY 1 (guide ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§15): GUIDE tap = global e-stop toggle ========= */
     if (ev_tap(B_GUIDE)) {
         /* MPU rollover sticky lockout (1.md 4.3): GUIDE tap acks it when
            stationary - E-STOP-class, manual only. Alexa CANNOT clear
@@ -2045,9 +2053,9 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         input_consume_all();
         return;
     }
-    /* GUIDE hold = NO action (premium guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4: no reboot on any hold) */
+    /* GUIDE hold = NO action (premium guide ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4: no reboot on any hold) */
 
-    /* ===== PRIORITY 2 (guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§15): controller disconnected = safe ======== */
+    /* ===== PRIORITY 2 (guide ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§15): controller disconnected = safe ======== */
     if (!pad || !pad->present) {
         s_horn_on = false;
         s_y_held  = false;
@@ -2058,7 +2066,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         return;                      /* safe outputs forced in drive_output */
     }
 
-    /* ==== PRIORITY 3 (guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§15): route by the unified context =========== */
+    /* ==== PRIORITY 3 (guide ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§15): route by the unified context =========== */
     switch (os_context()) {
     case INPUT_CTX_ESTOP:
         estop_input_handle(pad, now);
@@ -2099,7 +2107,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
 
     /* ================= DRIVE context: premium controls ===================== */
 
-    /* Neutral-release lock evaluation (guide ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¿Ãƒâ€šÃ‚Â½2.6): 250 ms continuous neutral */
+    /* Neutral-release lock evaluation (guide ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½2.6): 250 ms continuous neutral */
     if (s_drive_locked) {
         bool neutral = pad &&
             stick_dz(pad->lx) == 0 && stick_dz(pad->ly) == 0 &&
@@ -2116,7 +2124,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         }
     }
 
-    /* AUTO restricted sub-context (guide ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§13): only X exits AUTO here; LT and
+    /* AUTO restricted sub-context (guide ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§13): only X exits AUTO here; LT and
        stick manual takeover live in auto_logic. Everything else blocked. */
     if (g.mode == MODE_AUTO) {
         if (ev_tap(B_X)) {
@@ -2131,7 +2139,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         return;
     }
 
-    /* X: tap = drive-mode preview overlay, hold 1s = AUTO request (ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§5.2/ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§13) */
+    /* X: tap = drive-mode preview overlay, hold 1s = AUTO request (ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§5.2/ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§13) */
     /* PART 8 M3 (future foundation): X double-tap = 3s listen buffer */
     if (ev_double(B_X)) {
         if (mic_listen_start()) {
@@ -2161,7 +2169,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         input_consume(B_X);
     }
 
-    /* A: tap = headlight, hold 700ms = mist toggle (ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§5.2) */
+    /* A: tap = headlight, hold 700ms = mist toggle (ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§5.2) */
     if (ev_tap(B_A)) {
         g.headlight = !g.headlight;
         play_shot(_binary_a_click_wav_start, _binary_a_click_wav_end, 800);
@@ -2308,7 +2316,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
     /* D-pad */
     if (tap & B_DUP)    { g.hazard = !g.hazard; s_blip_until = now + 60; s_blip_freq = 1200; }
     /* D-pad UP hold 1 s = Quick settings sheet (BACK alternative).
-       The press edge already toggled hazard above ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â undo it so a hold
+       The press edge already toggled hazard above ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â undo it so a hold
        never flips hazard as a side effect. */
     if (ev_hold(B_DUP, 1000)) {
         g.hazard = !g.hazard;
@@ -2328,7 +2336,7 @@ static void input_handle(const xbox360_pad_t *pad, uint16_t dig, uint16_t tap, u
         s_blip_freq = g.rear_light_on ? 1200 : 600;
     }
     /* PART 12: D-Down hold = ALL LIGHTS master off/on.
-       The press edge above already toggled rear_light ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â exclude it from
+       The press edge above already toggled rear_light ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â exclude it from
        the decision, else "all were off + hold" computes ON then turns OFF. */
     if (ev_hold(B_DDOWN, IE_STD_HOLD_MS)) {
         bool any_on = g.headlight || g.hazard || g.sig_l || g.sig_r ||
@@ -2508,7 +2516,7 @@ static const char *ast_name(uint8_t ast)
     }
 }
 
-/* proportional wall steer: distance ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ steering correction */
+/* proportional wall steer: distance ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ steering correction */
 static int16_t wall_steer(uint16_t side_dist)
 {
     if (side_dist < 15)  return 50;   /* very close: strong push */
@@ -2535,7 +2543,7 @@ static uint8_t best_turn(uint16_t l, uint16_t r)
 }
 
 /* BUG-fix 2026-09-17: AST_SEARCH ka "3s me give up" branch kabhi reach nahi
-   hota tha ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â us hi case me g.ast_t0 har 500ms reset hota hai, isliye el
+   hota tha ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â us hi case me g.ast_t0 har 500ms reset hota hai, isliye el
    (now - ast_t0) 3000 tak pahunch hi nahi sakta tha. Ab alag timer. */
 static uint32_t s_search_t0;
 
@@ -2564,10 +2572,10 @@ static void auto_logic(const xbox360_pad_t *pad, uint32_t now)
         else              spd = 5;
 
         /* proportional wall following */
-        if (l < 60) st += wall_steer(l);   /* wall on left ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ steer right */
-        if (r < 60) st -= wall_steer(r);   /* wall on right ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ steer left */
+        if (l < 60) st += wall_steer(l);   /* wall on left ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ steer right */
+        if (r < 60) st -= wall_steer(r);   /* wall on right ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ steer left */
 
-        /* critical: front too close ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ reverse */
+        /* critical: front too close ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ reverse */
         if (f < 35) {
             g.ast = AST_REVERSE;
             g.ast_t0 = now;
@@ -2701,7 +2709,7 @@ static void auto_logic(const xbox360_pad_t *pad, uint32_t now)
 
     /* ======================== REVERSE: back up ======================== */
     case AST_REVERSE:
-        /* rear blocked ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ don't reverse, turn instead */
+        /* rear blocked ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ don't reverse, turn instead */
         if (b != 65535 && b < 20) {
             uint8_t turn = best_turn(l, r);
             if (turn_clear(turn, l, r)) g.ast = turn; else g.ast = (turn==AST_TURN_L?AST_TURN_R:AST_TURN_L);
@@ -2729,7 +2737,7 @@ static void auto_logic(const xbox360_pad_t *pad, uint32_t now)
     case AST_ESCAPE:
         if (el < 40) rumble(200, 200, 300);
         if (g.esc_phase == 0) {
-            /* phase 0: reverse ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â check rear */
+            /* phase 0: reverse ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â check rear */
             if (b != 65535 && b < 15) {
                 g.esc_phase = 1; g.esc_t0 = now; rumble(150,150,200);
             }
@@ -2915,7 +2923,7 @@ static void manual_logic(const xbox360_pad_t *pad, uint16_t dig, uint32_t now)
     float st = s_st_s;
     st = st * st * st; /* steering curve: halka = soft */
 
-    /* RT (Right Trigger): PROPORTIONAL to gear cap ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â halka dabao = low % of gear,
+    /* RT (Right Trigger): PROPORTIONAL to gear cap ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â halka dabao = low % of gear,
        poore dabao = full gear %. Gear1(5%) me 50% RT = 2.5% speed, 100% RT = 5% */
     float cap_raw = pad->rt / 255.0f;
     if (cap_raw < 0.05f) cap_raw = 0;            // tiny deadzone
@@ -2929,9 +2937,9 @@ static void manual_logic(const xbox360_pad_t *pad, uint16_t dig, uint32_t now)
     if (g.turbo) {
         cap = 1.0f; // turbo state (RB hold >=250ms) = 100% instant
     } else {
-        /* Car OS: settings SPEED CAP + virtual gear cap ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â PROPORTIONAL */
+        /* Car OS: settings SPEED CAP + virtual gear cap ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â PROPORTIONAL */
         float capmax = car_speed_cap_pct() / 100.0f;
-        cap = cap * capmax;  // proportional: RT% ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â gear%
+        cap = cap * capmax;  // proportional: RT% ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â gear%
         if (g.mode == MODE_CRAWL) cap *= 0.5f; // crawl = half again
     }
 
@@ -3011,7 +3019,7 @@ static void manual_logic(const xbox360_pad_t *pad, uint16_t dig, uint32_t now)
         servo_deg(LEDC_CHANNEL_1, 90);
         g.cannon_reset = false;
     } else {
-        /* right stick ko full rotation do: typical stick ~ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±16000 hota hai,
+        /* right stick ko full rotation do: typical stick ~ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±16000 hota hai,
            32767 nahi - isliye amplify + clamp (0..180) + smoothing */
         static float s_rx_s, s_ry_s;
         s_rx_s += ((float)stick_dz(pad->rx) - s_rx_s) * 0.25f;
@@ -3062,7 +3070,7 @@ static void drive_output(uint32_t now, const xbox360_pad_t *pad)
 
     /* 200ms safety cutoff: if no controller signal, IMMEDIATE motor stop.
        Uses USB-level timestamp (xbox360_last_data_ms) so idle controller
-       reports also keep the timeout from triggering ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â only true disconnect
+       reports also keep the timeout from triggering ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â only true disconnect
        or controller-off stops the motors. */
     if (now - xbox360_last_data_ms() > 200) {
         g.tgt_l = 0;
@@ -3084,13 +3092,13 @@ static void drive_output(uint32_t now, const xbox360_pad_t *pad)
        RT trigger = stationary rev (proportional, dead-zone applied).
        Menu/game (parked) ya estop me engine silent. */
     {
-        /* absolute wheel speed ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â pick larger magnitude */
+        /* absolute wheel speed ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â pick larger magnitude */
         int16_t a = g.cur_l, b = g.cur_r;
         if (a < 0) a = (int16_t)-a;
         if (b < 0) b = (int16_t)-b;
         int16_t spd_now = a > b ? a : b;
 
-        /* RT trigger: dead-zone (ignore <20), then proportional 0..200 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ 0..100 */
+        /* RT trigger: dead-zone (ignore <20), then proportional 0..200 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ 0..100 */
         int16_t rt_rev = 0;
         if (pad && !g.estop && pad->rt > 20) {
             uint32_t rt = pad->rt;
@@ -3099,7 +3107,7 @@ static void drive_output(uint32_t now, const xbox360_pad_t *pad)
         }
 
         int16_t es = spd_now > rt_rev ? spd_now : rt_rev;
-        /* engine lifecycle: the loop runs forever in audio_task ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â only this
+        /* engine lifecycle: the loop runs forever in audio_task ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â only this
            speed word moves, so the loop is never restarted from here.
            IDLE/HOME/menus/games/ARMING (parked) = 0; DRIVE entry ramps an
            audible idle in over ~600 ms; leaving DRIVE fades out over
@@ -3185,13 +3193,13 @@ static void drive_output(uint32_t now, const xbox360_pad_t *pad)
     gpio_set_level(PIN_REAR_LIGHT, g.rear_light_on ? 0 : 1);
 
     /* startup engine sound -> mist sync: two cranks 2-26% and 48-89% of 14.28s file (8000Hz->22050).
-       Only sync when NOT parked (menu/game) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â prevents relay clicking in menus. */
+       Only sync when NOT parked (menu/game) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â prevents relay clicking in menus. */
     if (!os_parked()) {
         bool sa=false; float prog=0;
         portENTER_CRITICAL(&s_wav_mux);
         if(s_startup.d && s_startup.len) {
             sa=true;
-            uint32_t out_total = (uint32_t)((uint64_t)s_startup.len / 2 * 22050 / STARTUP_SOUND_RATE);
+            uint32_t out_total = (uint32_t)((uint64_t)s_startup.len / 2 * CAR_AUDIO_RATE / STARTUP_SOUND_RATE);
             if(out_total) prog=(float)s_startup_out/(float)out_total;
         }
         portEXIT_CRITICAL(&s_wav_mux);
@@ -3482,7 +3490,7 @@ static void hw_init(void)
        same data line: rear strip DOUT -> under strip DIN.
        Pixel map: 0..1 = rear (L/R), 2..13 = under-car (12 LEDs).
        Board pe koi free GPIO nahi bacha (19/20 USB, 26-37 flash+PSRAM,
-       43/44 console UART) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â isliye chain approach. */
+       43/44 console UART) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â isliye chain approach. */
     led_strip_config_t sc = {
         .strip_gpio_num = PIN_LED_STRIP,
         .max_leds = LED_STRIP_NUM + UNDER_STRIP_NUM,
@@ -3499,7 +3507,7 @@ static void hw_init(void)
     ESP_ERROR_CHECK(led_strip_new_rmt_device(&sc, &rc, &s_strip));
     led_strip_clear(s_strip);
     led_strip_refresh(s_strip);
-    s_under = s_strip;  /* alias ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â under_px() offset LED_STRIP_NUM se likhta hai */
+    s_under = s_strip;  /* alias ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â under_px() offset LED_STRIP_NUM se likhta hai */
     ESP_LOGI(TAG, "Rear strip (pin %d, %d px) + under strip daisy-chain (%d px, total %d)",
              PIN_LED_STRIP, LED_STRIP_NUM, UNDER_STRIP_NUM, LED_STRIP_NUM + UNDER_STRIP_NUM);
 
@@ -3539,7 +3547,7 @@ static void hw_init(void)
         ESP_LOGI(TAG, "Front Right LED (pin %d) RMT OK", PIN_FRONT_LED_R);
     }
 
-    /* Under-car strip: alag RMT channel NAHI ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â rear strip ke saath daisy-chained
+    /* Under-car strip: alag RMT channel NAHI ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â rear strip ke saath daisy-chained
        (upar dekho). Board pe free GPIO nahi bacha tha. */
 
     /* battery ADC */
@@ -3699,7 +3707,7 @@ void car_task(void *arg)
         const xbox360_pad_t *pad = (p0 && p0->present && xbox360_dongle_connected()) ? p0 : NULL;
         bool cur_present = pad != NULL;
         if (cur_present && !prev_present) {
-            /* just reconnected ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â failsafe so car moves again.
+            /* just reconnected ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â failsafe so car moves again.
                E-STOP stays latched (GUIDE-tap + stationary clears it):
                auto-clearing here would let deflected sticks drive off. */
             xbox360_rumble(0, 0, 0);
@@ -3712,7 +3720,7 @@ void car_task(void *arg)
             ESP_LOGI(TAG, "controller reconnected (mode=%d)", g.mode);
         }
         if (!cur_present && prev_present) {
-            /* just disconnected ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â failsafe: motors off */
+            /* just disconnected ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â failsafe: motors off */
             g.tgt_l = g.tgt_r = 0;
             g.estop = true;
             roof_light_force_safe_off();
@@ -3769,7 +3777,7 @@ void car_task(void *arg)
         }
 
         /* NEON SERPENT arcade (120-LED matrix): active rehte input arcade
-           ka hai ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â car controls frozen, motors parked. GUIDE kabhi
+           ka hai ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â car controls frozen, motors parked. GUIDE kabhi
            consume nahi hota (car E-STOP hamesha chalta hai). */
         bool arcade_eats;
         if (matrix_show_active())
@@ -3950,7 +3958,7 @@ void car_task(void *arg)
                 s_arm_nt0 = 0;
                 os_request_screen(&s_os, OS_DRIVE_MAIN, now);
             } else if (now - s_os.state_enter_ms >= 8000) {
-                /* safety valve: never freeze forever ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â back to HOME */
+                /* safety valve: never freeze forever ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â back to HOME */
                 ESP_LOGW(TAG, "arming abort (>8s) -> HOME");
                 s_arm_nt0 = 0;
                 os_request_screen(&s_os, OS_HOME, now);
@@ -3968,7 +3976,7 @@ void car_task(void *arg)
             gfx_push();
         }
         mem_diag_tick(now);         /* PART 15/16: 10s cadence, task ctx */
-        /* Oct 2026: OLED removed (hardware removed) â€” no OLED redraw. */
+        /* Oct 2026: OLED removed (hardware removed) Ã¢â‚¬â€ no OLED redraw. */
 
         /* B+ pacing: fixed 20 ms while arcade active (no relative delay),
            otherwise the legacy relative delay. */
