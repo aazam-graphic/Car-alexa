@@ -52,6 +52,10 @@
 #include "roof_light.h"
 #include "led_matrix.h"   /* 120-LED arcade matrix on GPIO18 (room LED removed for test) */
 #include "game_serpent.h" /* NEON SERPENT arena on matrix (owns input while active) */
+#include "game_neon_raid.h" /* NEON RAID matrix arena */
+#include "game_neon_breaker.h" /* NEON BREAKER matrix arena */
+#include "game_runner.h" /* NEON RUNNER matrix arena */
+#include "matrix_show.h" /* Home tile: 20 full-colour matrix effects */
 #include "tft_display.h"
 #include "tft_boot_anim.h"
 #include "os_gfx.h"   /* early boot splash via framebuffer */
@@ -3619,6 +3623,7 @@ void car_task(void *arg)
     notif_init();
     net_wifi_start();   /* Oct 2026: ex-Alexa task owned this; SNTP clock needs it */
     serpent_arcade_init();   /* NEON SERPENT NVS hiscore load */
+    neon_raid_init();        /* NEON RAID reset/status */
     tft_set_brightness(s_set_tft_bright);  /* saved backlight brightness (guide 10/11) */
     settings_nvs_save();   /* persist new defaults if schema changed */
 
@@ -3658,7 +3663,7 @@ void car_task(void *arg)
         uint32_t dt_ms = last_loop_ms ? now - last_loop_ms : LOOP_MS;
         if (dt_ms > 100) dt_ms = 100;
         last_loop_ms = now;
-        bool arcade_on = serpent_arcade_active();
+        bool arcade_on = serpent_arcade_active() || neon_raid_active() || neon_breaker_active() || matrix_show_active() || runner_active();
         if (arcade_on && !s_arc_was) {   /* fresh session: reset P5 stats */
             s_per_min = 0xFFFFFFFF; s_per_max = 0;
             s_per_sum = 0; s_per_n = 0; s_per_over = 0;
@@ -3766,11 +3771,24 @@ void car_task(void *arg)
         /* NEON SERPENT arcade (120-LED matrix): active rehte input arcade
            ka hai ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â car controls frozen, motors parked. GUIDE kabhi
            consume nahi hota (car E-STOP hamesha chalta hai). */
-        bool arcade_eats = serpent_arcade_route(pad, dig, tap, now);
+        bool arcade_eats;
+        if (matrix_show_active())
+            arcade_eats = matrix_show_route(dig, tap, now);
+        else if (neon_breaker_active())
+            arcade_eats = neon_breaker_route(pad, dig, tap, now);
+        else if (neon_raid_active())
+            arcade_eats = neon_raid_route(pad, dig, tap, now);
+        else if (runner_active())
+            arcade_eats = runner_route(pad, dig, tap, now);
+        else
+            arcade_eats = serpent_arcade_route(pad, dig, tap, now);
         {   /* TFT edge cue: entry/exit visible on cockpit */
             static bool s_arc_was = false;
             if (arcade_eats && !s_arc_was)
-                cockpit_toast("ARCADE: NEON SERPENT", now);
+                cockpit_toast(matrix_show_active() ? "MATRIX: 20 EFFECTS" :
+                              neon_breaker_active() ? "ARCADE: NEON BREAKER" :
+                              neon_raid_active() ? "ARCADE: NEON RAID" :
+                              runner_active() ? "ARCADE: NEON RUNNER" : "ARCADE: NEON SERPENT", now);
             else if (!arcade_eats && s_arc_was)
                 cockpit_toast("ARCADE OFF", now);
             s_arc_was = arcade_eats;
@@ -3778,6 +3796,10 @@ void car_task(void *arg)
         if (!arcade_eats) {
             input_handle(pad, dig, tap, now);
         }
+        if (neon_raid_active()) neon_raid_tick(now);
+        if (neon_breaker_active()) neon_breaker_tick(now);
+        if (runner_active()) runner_tick(now);
+        if (matrix_show_active()) matrix_show_tick(now);
 
         if (arcade_eats) {
             /* arcade owns drive: force parked (motors/lights safe) */
@@ -3894,7 +3916,11 @@ void car_task(void *arg)
         rumble_update(now);
 
         /* ------- Car OS: navigation, state machine, rendering ------- */
-        os_handle_input(&s_os, pad, dig, tap, now);
+        /* While a matrix arcade is active, it owns ALL buttons/directions,
+           so the OS handler must not also see them (no B/A/X/Y leak). */
+        if (!serpent_arcade_active() && !neon_raid_active() && !neon_breaker_active() && !matrix_show_active() && !runner_active()) {
+            os_handle_input(&s_os, pad, dig, tap, now);
+        }
         /* DRIVE_ARMING exit: ~1.3 s elapsed AND sticks/triggers neutral for
            250 ms continuous. Until then motors stay 0 (parked) and the boot
            anim keeps playing. B-cancel is handled in os_handle_input. */
@@ -3937,7 +3963,7 @@ void car_task(void *arg)
         os_draw_tft(&s_os, now);    /* ~30 FPS, internal DMA fb push */
         /* PART 16: E-STOP renders above EVERY layer incl. games (L5).
            os_draw_tft skips games; overlay the alert card on top here. */
-        if (os_game_active() && s_os.alert_active) {
+        if ((os_game_active() || matrix_show_active()) && s_os.alert_active) {
             os_scr_safety_overlay(&s_os, now);
             gfx_push();
         }
@@ -3947,7 +3973,7 @@ void car_task(void *arg)
         /* B+ pacing: fixed 20 ms while arcade active (no relative delay),
            otherwise the legacy relative delay. */
         {
-            bool ae = serpent_arcade_active();
+            bool ae = serpent_arcade_active() || neon_raid_active() || neon_breaker_active() || matrix_show_active();
             if (ae) {
                 if (!s_arc_was) {
                     s_arc_wake = xTaskGetTickCount();

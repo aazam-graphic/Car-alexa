@@ -16,6 +16,10 @@
 #include "ui_motion_radar.h"  /* PART 12: BACK 1.5s radar-full */
 #include "snd_bank.h"
 #include "game_serpent.h"   /* rumble mode in SETTINGS */
+#include "game_neon_raid.h" /* Neon Raid arcade open */
+#include "game_neon_breaker.h" /* Neon Breaker arcade open */
+#include "game_runner.h" /* Neon Runner arcade open */
+#include "matrix_show.h"
 #include "notif.h"
 #include "os_gfx.h"   /* PART 10: thumbnail capture */
 #include "os_theme.h" /* PART 12: radar-full clear color */
@@ -204,7 +208,7 @@ static void go(os_ctx_t *ctx, os_state_t st, uint32_t now)
     if (is_menu_state(st) && is_menu_state(ctx->state)) {
         os_win_push(ctx, ctx->state);
     } else if (st == OS_DRIVE_MAIN || st == OS_BOOT || st == OS_HOME ||
-               st == OS_STANDBY || st == OS_DRIVE_ARMING ||
+               st == OS_STANDBY || st == OS_DRIVE_ARMING || st == OS_MATRIX_SHOW ||
                (st >= OS_GAME_1 && st <= OS_GAME_6)) {
         ctx->win_depth = 0;
     }
@@ -231,33 +235,34 @@ static const os_state_t s_tile_state_p0[9] = {
     OS_GAMES_HUB,  OS_DIAG,       OS_DRIVE_MAIN,   /* Games Diag Radar */
     OS_DRIVE_MAIN, OS_TRIP,       OS_NOTIF,        /* Roof Trip Notify */
 };
-static const os_state_t s_tile_state_p1[4] = {
+static const os_state_t s_tile_state_p1[5] = {
     OS_DRIVE_ANALYTICS, OS_SCORE,
-    OS_CONN,            OS_STANDBY,   /* 3 = PARK clock */
+    OS_CONN,            OS_STANDBY, OS_MATRIX_SHOW, /* clock, then 299 LED show */
 };
 
 static const char *s_names[] = {
     "BOOT", "HOME", "DRIVE", "ANALYTICS", "DIAG", "SETTINGS",
     "GAMES", "LANE RUNNER", "NEON SERPENT", "REFLEX", "MEMORY", "SENSOR",
-    "REDLINE OPS",
-    "SCORE", "TRIP", "CONNECT", "NOTIFY", "STANDBY", "ARMING"
+    "NEON RUNNER",
+    "SCORE", "TRIP", "CONNECT", "NOTIFY", "STANDBY", "ARMING", "MATRIX SHOW"
 };
 static const char *s_hints[] = {
     "", "A:OPEN B:CLOCK RB:PAGE", "A/B:MENU RS:GEAR", "B:MENU", "L/R:TAB A/B:MENU",
     "UP/DN:SEL A:APPLY B:BACK ST:SAVE X:JUMP",
     "UP/DN:SEL A:PLAY B:MENU", "B:EXIT", "B:EXIT", "B:EXIT", "B:EXIT", "B:EXIT",
     "B:EXIT",
-    "B:BACK", "A:RESET B:BACK", "B:BACK", "UP/DN:SCROLL B:BACK", "START:MENU", "WAIT..."
+    "B:BACK", "A:RESET B:BACK", "B:BACK", "UP/DN:SCROLL B:BACK", "START:MENU", "WAIT...",
+    "LEFT/RIGHT:FX A:AUTOPLAY B:HOME"
 };
 
 const char *os_state_name(os_state_t st)
 {
-    return (st >= 0 && st <= OS_DRIVE_ARMING) ? s_names[st] : "?";
+    return (st >= 0 && st <= OS_MATRIX_SHOW) ? s_names[st] : "?";
 }
 
 const char *os_state_hint(os_state_t st)
 {
-    return (st >= 0 && st <= OS_DRIVE_ARMING) ? s_hints[st] : "";
+    return (st >= 0 && st <= OS_MATRIX_SHOW) ? s_hints[st] : "";
 }
 
 /* ---- Alexa bridge entry points (car_task context only) ------------------ */
@@ -265,8 +270,8 @@ os_ctx_t *car_os_ctx(void) { return s_ctx; }
 
 void os_request_screen(os_ctx_t *ctx, int st, uint32_t now)
 {
-    if (!ctx || st < OS_BOOT || st > OS_DRIVE_ARMING) return;
-    if (g.estop) return;
+    if (!ctx || st < OS_BOOT || st > OS_MATRIX_SHOW) return;
+    if (g.estop && st != OS_HOME) return;
     go(ctx, (os_state_t)st, now);
 }
 
@@ -519,7 +524,7 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
            Timer runs ONLY while continuously parked: holding it in DRIVE
            does nothing (no auto-HOME shortcut into a reboot). Countdown
            blips at 1 s / 2 s, restart at 3 s. */
-        if (!os_parked() || serpent_arcade_active()) { s_rb_t0 = 0; s_rb_blips = 0; }
+        if (!os_parked() || serpent_arcade_active() || neon_raid_active() || neon_breaker_active() || matrix_show_active() || runner_active()) { s_rb_t0 = 0; s_rb_blips = 0; }
         else {
             if (!s_rb_t0) { s_rb_t0 = now; s_rb_blips = 0; }
             uint32_t held = now - s_rb_t0;
@@ -549,7 +554,7 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
         input_context_t ictx = os_context();
         bool allow = (ictx == INPUT_CTX_STANDBY || ictx == INPUT_CTX_OS ||
                       ictx == INPUT_CTX_BOOT) && !g.estop &&
-                     !serpent_arcade_active();   /* arcade me A = game input, reboot nahi */
+                     !serpent_arcade_active() && !neon_raid_active() && !neon_breaker_active() && !matrix_show_active() && !runner_active();   /* arcade me A = game input, reboot nahi */
         if (allow && input_pressed(B_A)) {
             if (!s_tb_t0) { s_tb_t0 = now; s_tb_blips = 0; }
             uint32_t held = now - s_tb_t0;
@@ -737,7 +742,7 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
     }
 
     case OS_HOME: {                    /* PART 10: widget cards, p0=9 p1=4 */
-        uint8_t ntiles = ctx->home_page ? 4 : 9;
+        uint8_t ntiles = ctx->home_page ? 5 : 9;
         uint8_t row = ctx->home_sel / 3, col = ctx->home_sel % 3;
         if (tap & B_DUP)    { row = (row + 2) % 3; ctx->home_sel = row * 3 + col; car_sfx_blip(900); snd_play("ui_nav"); }
         if (tap & B_DDOWN)  { row = (row + 1) % 3; ctx->home_sel = row * 3 + col; car_sfx_blip(900); snd_play("ui_nav"); }
@@ -752,6 +757,15 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
             if (!ctx->home_page && ctx->home_sel == 1) {
                 if (serpent_arcade_open()) break;
                 car_sfx_blip(300);
+                break;
+            }
+            if (ctx->home_page && ctx->home_sel == 4) {
+                if (matrix_show_open(now)) {
+                    car_sfx_click();
+                    go(ctx, OS_MATRIX_SHOW, now);
+                } else {
+                    car_sfx_blip(300);
+                }
                 break;
             }
             const os_state_t *map = ctx->home_page ? s_tile_state_p1 : s_tile_state_p0;
@@ -781,6 +795,10 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
         if (tap & B_B) { os_win_pop(ctx, now); go(ctx, OS_STANDBY, now); }
         break;
     }
+
+    case OS_MATRIX_SHOW:
+        /* matrix_show_route() owns input while the effect screen is active. */
+        break;
 
     case OS_DRIVE_MAIN:
         /* ambient color picker (premium guide 5.2): Y hold opens; car parks */
@@ -1156,6 +1174,27 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
                 } else {
                     car_sfx_blip(300);
                 }
+            } else if (gi == 3) {   /* NEON RAID: matrix arcade, not a TFT game */
+                if (neon_raid_open()) {
+                    car_sfx_click();
+                    go(ctx, OS_GAME_4, now);
+                } else {
+                    car_sfx_blip(300);
+                }
+            } else if (gi == 4) {   /* NEON BREAKER: matrix arcade, not a TFT game */
+                if (neon_breaker_open()) {
+                    car_sfx_click();
+                    go(ctx, OS_GAME_5, now);
+                } else {
+                    car_sfx_blip(300);
+                }
+            } else if (gi == 5) {   /* NEON RUNNER: matrix arcade, not a TFT game */
+                if (runner_open()) {
+                    car_sfx_click();
+                    go(ctx, OS_GAME_6, now);
+                } else {
+                    car_sfx_blip(300);
+                }
             } else if (gi < OS_GAME_COUNT) {
                 OS_GAMES[gi].init();
                 car_sfx_click();
@@ -1340,6 +1379,30 @@ void os_draw_tft(os_ctx_t *ctx, uint32_t now)
         }
         return;
     }
+    if (matrix_show_active()) {
+        os_scr_matrix_show(ctx, now);
+        if (ui_has_dirty()) {
+            gfx_push();
+            ui_clear_dirty();
+        }
+        return;
+    }
+    if (neon_breaker_active()) {
+        os_scr_matrix_breaker(ctx, now);
+        if (ui_has_dirty()) {
+            gfx_push();
+            ui_clear_dirty();
+        }
+        return;
+    }
+    if (runner_active()) {
+        os_scr_matrix_runner(ctx, now);
+        if (ui_has_dirty()) {
+            gfx_push();
+            ui_clear_dirty();
+        }
+        return;
+    }
     if (os_game_active()) return;              /* game drew itself */
 
     /* PART 10.5/10.6: on state change, record history + capture thumbnail
@@ -1460,6 +1523,8 @@ void os_draw_tft(os_ctx_t *ctx, uint32_t now)
 void os_game_frame(os_ctx_t *ctx, const xbox360_pad_t *pad, uint32_t now)
 {
     if (!os_game_active() || !gfx_fb()) return;
+    /* Matrix games update/render in the fixed-rate car loop, not the TFT registry. */
+    if (ctx->state == OS_GAME_3 || ctx->state == OS_GAME_4 || ctx->state == OS_GAME_5 || ctx->state == OS_GAME_6) return;
     static uint32_t s_last = 0;
     if (now - s_last < 33) return;             /* ~30 FPS */
     s_last = now;

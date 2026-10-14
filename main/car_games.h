@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 #ifndef OS_GAME_COUNT
-#define OS_GAME_COUNT 3      /* 3 games: Neon Convoy, Neon Serpent, Matrix Snake */
+#define OS_GAME_COUNT 6      /* Convoy, Serpent TFT, Matrix Snake, Neon Raid, Neon Breaker, Runner */
 #endif
 
 typedef struct {

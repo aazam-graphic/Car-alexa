@@ -49,6 +49,7 @@ typedef enum {
     OS_NOTIF,          /* PART 10: Notification Center */
     OS_STANDBY,        /* CLOCK/STANDBY: table clock, parked, START-only */
     OS_DRIVE_ARMING,   /* DRIVE pre-stage: 1.3 s anim+chime, neutral gate */
+    OS_MATRIX_SHOW,    /* 299 LED matrix effects chooser */
 } os_state_t;
 
 /* unified input context (premium guide Â§3) - single source of truth. car.c

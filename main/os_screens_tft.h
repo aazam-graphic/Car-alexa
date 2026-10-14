@@ -34,6 +34,9 @@ void os_scr_switcher(const os_ctx_t *ctx, uint32_t now);
 void os_scr_jump(const os_ctx_t *ctx);
 /* Matrix Snake arcade companion (P4): live mirror + stats while arcade runs */
 void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now);
+void os_scr_matrix_breaker(const os_ctx_t *ctx, uint32_t now);
+void os_scr_matrix_show(const os_ctx_t *ctx, uint32_t now);
+void os_scr_matrix_runner(const os_ctx_t *ctx, uint32_t now);
 
 #ifdef __cplusplus
 }

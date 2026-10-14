@@ -22,6 +22,10 @@
 #include "net_wifi.h" /* PART 10: connectivity window */
 #include "snd_bank.h" /* standby: first-sync ding */
 #include "game_serpent.h" /* HOME MATRIX tile hiscore */
+#include "game_neon_breaker.h"
+#include "game_runner.h"
+#include "runner_status.h"
+#include "matrix_show.h"
 #include "led_matrix.h"   /* hub MATRIX tile offline grey */
 #include <time.h>     /* standby clock: IST wall time */
 #include "esp_heap_caps.h"
@@ -295,7 +299,7 @@ static const char *s_home_labels_p0[9] = {
     "DRIVE", "SNAKE", "SETTINGS", "GAMES", "DIAG", "RADAR", "ROOF", "TRIP", "NOTIFY"
 };
 static const char *s_home_labels_p1[9] = {
-    "GRAPHS", "SCORE", "LINK", "CLOCK", "", "", "", "", ""
+    "GRAPHS", "SCORE", "LINK", "CLOCK", "MATRIX", "", "", "", ""
 };
 static const ui_icon_t s_home_icons_p0[9] = {
     UI_ICON_DRIVE, UI_ICON_SCREEN, UI_ICON_GEAR,
@@ -305,7 +309,7 @@ static const ui_icon_t s_home_icons_p0[9] = {
 static const ui_icon_t s_home_icons_p1[9] = {
     UI_ICON_GRAPH, UI_ICON_SPARK,
     UI_ICON_AUTO, UI_ICON_OK,
-    UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK
+    UI_ICON_SCREEN, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK
 };
 
 static void home_card_value(int slot, uint8_t page, char *out, size_t n)
@@ -343,6 +347,7 @@ static void home_card_value(int slot, uint8_t page, char *out, size_t n)
         }
         case 2: snprintf(out, n, "%s", net_wifi_up() ? "WIFI" : "OFF"); break;
         case 3: snprintf(out, n, "IDLE"); break;
+        case 4: snprintf(out, n, "20 FX"); break;
         default: snprintf(out, n, "OPEN"); break;
         }
     }
@@ -377,7 +382,7 @@ void os_scr_home(const os_ctx_t *ctx, uint32_t now)
 
     const char *const *labels = ctx->home_page ? s_home_labels_p1 : s_home_labels_p0;
     const ui_icon_t *icons = ctx->home_page ? s_home_icons_p1 : s_home_icons_p0;
-    const int ntiles = ctx->home_page ? 4 : 9;   /* p1: GRAPHS SCORE LINK CLOCK */
+    const int ntiles = ctx->home_page ? 5 : 9;   /* page two adds the 299 LED MATRIX tile */
     for (int i = 0; i < ntiles; i++) {
         int col = i % 3, row = i / 3;
         int x = 8 + col * 103, y = 34 + row * 64, w = 98, h = 52;
@@ -1329,8 +1334,11 @@ static const ui_icon_t s_game_icons[OS_GAME_COUNT] = {
     UI_ICON_SPARK,   /* NEON CONVOY  */
     UI_ICON_AUTO,    /* NEON SERPENT */
     UI_ICON_SCREEN,  /* MATRIX SNAKE */
+    UI_ICON_GAMES,   /* NEON RAID */
+    UI_ICON_GAMES,   /* NEON BREAKER */
+    UI_ICON_AUTO,    /* NEON RUNNER */
 };
-static const char *const s_game_nums[OS_GAME_COUNT] = { "1", "2", "3" };
+static const char *const s_game_nums[OS_GAME_COUNT] = { "1", "2", "3", "4", "5", "6" };
 
 void os_scr_gameshub(const os_ctx_t *ctx, uint32_t now)
 {
@@ -1359,7 +1367,7 @@ void os_scr_gameshub(const os_ctx_t *ctx, uint32_t now)
                             foc ? RGB565(20, 12, 0) : UI_MUTED);
 
         /* icon + name + desc (MATRIX greyed when offline) */
-        bool mx_off = (i == 2) && !led_matrix_ready();
+        bool mx_off = ((i == 2 || i == 3 || i == 4 || i == 5) && !led_matrix_ready());
         ui_draw_icon(48, y + 7, 16, s_game_icons[i],
                      mx_off ? UI_MUTED : (foc ? UI_ACCENT : UI_MUTED));
         gfx_text_medium(72, y + 7, OS_GAMES[i].name,
@@ -1612,8 +1620,8 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
     static uint32_t p_score = 0xFFFFFFFF, p_hi = 0xFFFFFFFF;
     static uint8_t  p_level = 0xFF, p_food = 0xFF, p_len = 0xFF;
     static uint8_t  p_lives = 0xFF, p_bonus = 0xFF, p_mines = 0xFF;
-    static uint8_t  p_wrap = 0xFF, p_rum = 0xFF, p_newhi = 0xFF, p_prac = 0xFF;
-    static uint16_t p_step = 0xFFFF, p_bms = 0xFFFF;
+    static uint8_t  p_wrap = 0xFF, p_prac = 0xFF;
+    static uint16_t p_bms = 0xFFFF;
     bool full = (p_state != s.state);
     p_state = s.state;
 
@@ -1635,7 +1643,7 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
                       (s.state == 6) ? UI_DANGER :
                       (s.state == 9) ? UI_WARNING : UI_DATA;
         gfx_rect(8, 4, 170, 20, UI_SURFACE);
-        gfx_text_small(14, 9, "MATRIX SNAKE", UI_TEXT);
+        gfx_text_small(14, 9, "NEON SERPENT V2", UI_TEXT);
         gfx_rect(214, 4, 98, 20, UI_SURFACE_2);
         gfx_rect_outline(214, 4, 98, 20, cc);
         gfx_text_center_box(214, 8, 98, chip, UI_FONT_SMALL, cc);
@@ -1643,10 +1651,10 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
 
     /* mirror: draw only cells whose RGB changed (shadow diff) */
     {
-        static uint8_t shadow[120][3];
+        static uint8_t shadow[MATRIX_LED_COUNT][3];
         static bool shadow_ok = false;
-        int pitch = (s.fw <= 10 && s.fh > 10) ? 11 : 14;
-        int cw = pitch - 2;
+        int pitch = (s.fw >= 20 || s.fh >= 20) ? (s.fh >= 20 ? 6 : 8) : 14;
+        int cw = pitch - 2 < 3 ? 3 : pitch - 2;
         int mw = s.fw * pitch, mh = s.fh * pitch;
         int mx = 8 + (166 - mw) / 2, my = 36 + (138 - mh) / 2;
         if (full) {
@@ -1654,13 +1662,15 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
             gfx_rect_outline(8, 36, 166, 138, UI_BORDER);
             shadow_ok = false;
         }
-        for (int y = 0; y < s.fh && y < 12; y++) {
-            for (int x = 0; x < s.fw && x < 12; x++) {
+        bool dim = (s.state != 4);  /* state other than PLAY: dimmed */
+        for (int y = 0; y < s.fh && y < MATRIX_HEIGHT; y++) {
+            for (int x = 0; x < s.fw && x < MATRIX_WIDTH; x++) {
                 int idx = y * s.fw + x;
-                if (idx >= 120) continue;
+                if (idx >= MATRIX_LED_COUNT) continue;
                 uint8_t r = s.frame_rgb[idx][0];
                 uint8_t g = s.frame_rgb[idx][1];
                 uint8_t b = s.frame_rgb[idx][2];
+                if (dim) { r = (r * 45) / 100; g = (g * 45) / 100; b = (b * 45) / 100; }
                 if (shadow_ok && shadow[idx][0] == r &&
                     shadow[idx][1] == g && shadow[idx][2] == b) continue;
                 shadow[idx][0] = r; shadow[idx][1] = g; shadow[idx][2] = b;
@@ -1696,7 +1706,7 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
     if (full || p_level != s.level) {
         p_level = s.level;
         char b[24];
-        snprintf(b, sizeof(b), "L %02d / 10", s.level);
+        snprintf(b, sizeof(b), "L %02d / %d", s.level, s.level_count);
         gfx_rect(184, 100, 72, 14, UI_BG);
         gfx_text_small(188, 102, b, UI_TEXT);
         gfx_rect(184, 114, 128, 14, UI_BG);
@@ -1706,8 +1716,8 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
     /* food bar + text */
     if (full || p_food != s.food_in_level) {
         p_food = s.food_in_level;
-        char b[24];
-        snprintf(b, sizeof(b), "FOOD %d / %d", s.food_in_level, s.food_target);
+        char b[32];
+        snprintf(b, sizeof(b), "FOOD %d / %d  @%d,%d", s.food_in_level, s.food_target, s.food_x, s.food_y);
         gfx_rect(184, 130, 128, 24, UI_BG);
         gfx_text_small(188, 130, b, UI_TEXT_2);
         ui_progress(188, 142, 120, 8, s.food_in_level, s.food_target, UI_OK);
@@ -1735,25 +1745,29 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
         }
         ui_mark_dirty(260, 100, 52, 14);
     }
-    /* bonus bar / banner */
+    /* V2 power/event banner (SHIELD/SLOW/X2/GHOST + level/life/hi events) */
     {
         static uint8_t p_pad = 0xFF, p_endl = 0xFF, p_st8 = 0xFF;
-        bool bon = s.bonus_ms_left > 0;
-        uint16_t bms = s.bonus_ms_left > 7000 ? 7000 : s.bonus_ms_left;
-        if (full || (p_bonus > 0) != bon || (bon && (bms / 700) != (p_bms / 700)) ||
+        bool power = s.power != 0 && s.power_ms_left > 0;
+        uint16_t pms = s.power_ms_left > 12000 ? 12000 : s.power_ms_left;
+        if (full || (p_bonus > 0) != power || (power && (pms / 600) != (p_bms / 600)) ||
             p_pad != s.pad_lost || p_endl != (s.endless && s.state == 4) ||
-            p_st8 != (s.state == 8)) {
+            p_st8 != (s.state == 8) || s.new_hi) {
             p_pad = s.pad_lost; p_endl = (s.endless && s.state == 4);
             p_st8 = (s.state == 8);
-            p_bonus = bon ? 1 : 0; p_bms = bms;
+            p_bonus = power ? 1 : 0; p_bms = pms;
             gfx_rect(8, 180, 304, 14, UI_BG);
-            if (bon) {
-                gfx_text_small(12, 182, "BONUS", UI_WARNING);
-                ui_progress(70, 182, 100, 8, bms, 7000, UI_WARNING);
+            if (power) {
+                static const char *pn[] = {"", "SHIELD", "SLOW", "X2 SCORE", "GHOST"};
+                uint16_t ic = (s.power==1)?UI_DATA:(s.power==2)?UI_WARNING:(s.power==3)?UI_OK:UI_TEXT_2;
+                const char *ps = s.power < 5 ? pn[s.power] : "POWER";
+                gfx_rect(12, 182, 10, 10, ic);
+                gfx_text_small(26, 182, ps, UI_OK);
+                ui_progress(82, 182, 96, 8, pms, 12000, UI_OK);
             } else if (s.pad_lost) {
                 gfx_text_small(12, 182, "RECONNECT PAD", UI_DANGER);
             } else if (s.state == 8) {
-                gfx_text_small(12, 182, s.winfx ? "BOARD FULL!" : "LEVEL CLEAR", UI_OK);
+                gfx_text_small(12, 182, s.winfx ? "ENDLESS UNLOCKED" : "LEVEL CLEAR", UI_OK);
             } else if (s.endless && s.state == 4) {
                 gfx_text_small(12, 182, "ENDLESS", UI_WARNING);
             } else if (s.state == 6 || s.state == 7) {
@@ -1765,23 +1779,24 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
             }
             ui_mark_dirty(8, 180, 304, 14);
         }
-        p_newhi = s.new_hi;
     }
-    /* stats row (OVER shows death reason) */
-    static uint8_t p_rgb = 0xFF;
-    uint8_t rgbnow = car_get_rgb_bright();
-    if (full || p_len != s.len || p_step != s.step_ms || p_rum != s.rumble_mode ||
-        p_rgb != rgbnow || p_state == 9 || s.state == 9) {
-        p_len = s.len; p_step = s.step_ms; p_rum = s.rumble_mode; p_rgb = rgbnow;
-        char b[48];
+    /* V2 stats row: length, combo and elapsed time (OVER shows death + max combo) */
+    static uint8_t p_combo = 0xFF;
+    static uint32_t p_ptime = 0xFFFFFFFF;
+    uint32_t psec = s.play_time_ms / 1000u;
+    if (full || p_len != s.len || p_combo != s.combo || p_ptime / 5 != psec / 5 ||
+        p_state == 9 || s.state == 9) {
+        p_len = s.len; p_combo = s.combo; p_ptime = s.play_time_ms;
+        char b[64];
+        uint32_t sec = s.play_time_ms / 1000u;
+        uint32_t mm = sec / 60u, ss = sec % 60u;
         if (s.state == 9) {
             static const char *dr[] = { "", "WALL", "SELF", "MINE" };
             const char *d = s.death_reason < 4 ? dr[s.death_reason] : "?";
-            snprintf(b, sizeof(b), "DIED: %s  SCORE %lu", d, (unsigned long)s.score);
+            snprintf(b, sizeof(b), "DIED %s  MAX COMBO x%d", d, s.max_combo);
         } else {
-            float sps = s.step_ms ? 1000.0f / s.step_ms : 0;
-            snprintf(b, sizeof(b), "LEN %d SPD %.1f RGB %d%%",
-                     s.len, (double)sps, car_get_rgb_bright());
+            snprintf(b, sizeof(b), "LEN %d  COMBO x%d  TIME %02lu:%02lu",
+                     s.len, s.combo, (unsigned long)mm, (unsigned long)ss);
         }
         gfx_rect(8, 198, 304, 16, UI_BG);
         gfx_text_small(12, 201, b, UI_TEXT_2);
@@ -1789,9 +1804,9 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
     }
     /* footer hints via bottombar (custom rect would overlap it) */
     {
-        const char *f = (s.state == 1) ? "UP/DN LVL  START PLAY" :
-                        (s.state == 4) ? "START PAUSE  BACK HOLD EXIT" :
-                        (s.state == 5) ? "START RESUME  BACK HOLD EXIT" :
+        const char *f = (s.state == 1) ? "Y/X +1  A/B -1  START PLAY" :
+                        (s.state == 4) ? "Y UP  A DOWN  X LEFT  B RIGHT" :
+                        (s.state == 5) ? "START RESUME  BACK MENU" :
                         (s.state == 7) ? "GET READY" :
                         (s.state == 9) ? "START RETRY  BACK MENU" :
                         (s.state == 0) ? "" : "BACK HOLD EXIT";
@@ -1801,4 +1816,152 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now)
         }
         ui_draw_bottombar(pf[0] ? pf : "BACK HOLD EXIT", "SNAKE");
     }
+}
+
+/* NEON RUNNER companion: compact TFT snapshot of logical game state. */
+void os_scr_matrix_runner(const os_ctx_t *ctx, uint32_t now)
+{
+    (void)ctx;
+    runner_status_t s;
+    runner_get_status(&s);
+
+    static const char *const states[] = { "OFF", "MENU", "READY", "PLAY", "PAUSE", "DEATH", "CLEAR", "OVER" };
+    const char *st = (s.state <= RUNNER_GAME_OVER) ? states[s.state] : "?";
+
+    gfx_clear(UI_BG);
+    ui_draw_topbar(ctx);
+    gfx_rect(8, 4, 304, 20, UI_SURFACE);
+    gfx_text_small(14, 9, "NEON RUNNER", UI_TEXT);
+    gfx_rect(214, 4, 98, 20, UI_SURFACE_2);
+    gfx_rect_outline(214, 4, 98, 20, UI_DATA);
+    gfx_text_center_box(214, 8, 98, st, UI_FONT_SMALL, UI_TEXT);
+
+    char b[64];
+    snprintf(b, sizeof(b), "SCORE %lu", (unsigned long)s.score);
+    gfx_text_small(14, 40, b, UI_TEXT);
+    snprintf(b, sizeof(b), "LEVEL %u", s.level);
+    gfx_text_small(14, 60, b, UI_DATA);
+    snprintf(b, sizeof(b), "LIVES %u", s.lives);
+    gfx_text_small(14, 80, b, UI_TEXT);
+    snprintf(b, sizeof(b), "ENERGY %u", (unsigned)s.energy);
+    gfx_text_small(14, 100, b, UI_WARNING);
+    snprintf(b, sizeof(b), "PLAYER x:%d y:%d  CAM:%d", s.player_x, s.player_y, s.camera_x);
+    gfx_text_small(14, 124, b, UI_MUTED);
+    snprintf(b, sizeof(b), "GROUNDED %s", s.grounded ? "YES" : "NO");
+    gfx_text_small(14, 144, b, UI_TEXT_2);
+    ui_draw_bottombar("A START/JUMP  B START  BACK MENU  HOLD BACK EXIT", "RUNNER");
+    ui_mark_dirty_full();
+}
+
+/* NEON BREAKER companion: compact live 23x13 mirror and useful run stats.
+   Limit the TFT mirror to 10 FPS; the LED matrix game continues at 30 FPS. */
+void os_scr_matrix_breaker(const os_ctx_t *ctx, uint32_t now)
+{
+    (void)ctx;
+    static uint32_t s_last = 0;
+    if ((int32_t)(now - s_last) < 100) return;
+    s_last = now;
+
+    neon_breaker_status_t s;
+    neon_breaker_get_status(&s);
+    gfx_clear(UI_BG);
+    gfx_rect(8, 4, 304, 20, UI_SURFACE);
+    gfx_text_small(14, 9, "NEON BREAKER: CORE WAR", UI_TEXT);
+    static const char *const states[] = { "OFF", "MENU", "READY", "PLAY", "PAUSE", "CLEAR", "OVER" };
+    const char *state = s.state < (sizeof(states) / sizeof(states[0])) ? states[s.state] : "?";
+    gfx_rect(226, 4, 86, 20, UI_SURFACE_2);
+    gfx_rect_outline(226, 4, 86, 20, s.state == 6 ? UI_DANGER : UI_ACCENT);
+    gfx_text_center_box(226, 8, 86, state, UI_FONT_SMALL,
+                        s.state == 6 ? UI_DANGER : UI_ACCENT);
+
+    /* 23x13 cells at 6 px pitch fit cleanly in the left mirror panel. */
+    gfx_rect(8, 32, 150, 112, UI_SURFACE);
+    gfx_rect_outline(8, 32, 150, 112, UI_BORDER);
+    int pitch = 6, cell = 4;
+    int mx = 11, my = 47;
+    for (int y = 0; y < s.fh && y < 13; y++) {
+        for (int x = 0; x < s.fw && x < 23; x++) {
+            int idx = y * s.fw + x;
+            if (idx >= 299) continue;
+            uint8_t r = s.frame_rgb[idx][0], g = s.frame_rgb[idx][1], b = s.frame_rgb[idx][2];
+            gfx_rect(mx + x * pitch, my + y * pitch, cell, cell,
+                     (r | g | b) ? RGB565(r, g, b) : UI_BG);
+        }
+    }
+    gfx_rect(166, 32, 146, 112, UI_SURFACE);
+    gfx_text_small(174, 38, "SCORE", UI_MUTED);
+    gfx_number_7seg(174, 50, (int)(s.score > 999999 ? 999999 : s.score), 6, 2, UI_TEXT, UI_SURFACE);
+    char line[48];
+    snprintf(line, sizeof(line), "HI %lu", (unsigned long)s.hi);
+    gfx_text_small(174, 76, line, UI_DATA);
+    snprintf(line, sizeof(line), "LEVEL %02u", (unsigned)s.level);
+    gfx_text_small(174, 94, line, UI_TEXT);
+    snprintf(line, sizeof(line), "LIVES %u  BRICKS %u", (unsigned)s.lives, (unsigned)s.bricks_left);
+    gfx_text_small(174, 110, line, UI_TEXT_2);
+    if (s.boss_active) {
+        snprintf(line, sizeof(line), "BOSS HP %u", (unsigned)s.boss_hp);
+        gfx_text_small(174, 128, line, UI_DANGER);
+    }
+    gfx_rect(8, 154, 304, 40, UI_SURFACE);
+    gfx_text_small(14, 160, "ENERGY", UI_MUTED);
+    ui_progress(66, 160, 238, 8, s.energy, 100, UI_ACCENT);
+    snprintf(line, sizeof(line), "COMBO x%u   SHIELD %u   MULTI %u", (unsigned)s.combo,
+             (unsigned)s.shield_charges, (unsigned)s.multi_charges);
+    gfx_text_small(14, 178, line, UI_TEXT_2);
+    ui_draw_bottombar("LEFT STICK: MOVE  A:LAUNCH  BACK TAP:MENU HOLD:EXIT", "299 LED MATRIX");
+    ui_mark_dirty_full();
+}
+
+static uint16_t show_palette(uint8_t i)
+{
+    static const uint16_t c[12] = {
+        RGB565(255, 35, 65), RGB565(255, 125, 25), RGB565(255, 225, 40),
+        RGB565(95, 255, 45), RGB565(20, 235, 190), RGB565(30, 170, 255),
+        RGB565(75, 80, 255), RGB565(170, 55, 255), RGB565(250, 45, 190),
+        RGB565(255, 100, 140), RGB565(235, 235, 255), RGB565(70, 255, 245)
+    };
+    return c[i % 12];
+}
+
+void os_scr_matrix_show(const os_ctx_t *ctx, uint32_t now)
+{
+    static uint32_t s_last = 0;
+    if ((int32_t)(now - s_last) < 200) return;
+    s_last = now;
+    uint8_t idx = matrix_show_effect_index();
+    uint8_t count = matrix_show_effect_count();
+    gfx_clear(UI_BG);
+    ui_draw_topbar(ctx);
+
+    gfx_rect(8, 31, 304, 54, UI_SURFACE);
+    gfx_rect_outline(8, 31, 304, 54, UI_ACCENT);
+    gfx_number_7seg(18, 42, idx + 1, 2, 3, UI_DATA, UI_SURFACE);
+    gfx_text_medium(78, 39, matrix_show_effect_name(idx), UI_TEXT);
+    gfx_text_small(78, 59, matrix_show_effect_description(idx), UI_TEXT_2);
+    char status[32];
+    snprintf(status, sizeof(status), "%02u / %02u  %s", (unsigned)(idx + 1), (unsigned)count,
+             matrix_show_auto_demo() ? "AUTO DEMO" : "MANUAL");
+    gfx_text_right(304, 71, status, matrix_show_auto_demo() ? UI_OK : UI_MUTED, 0, 1);
+
+    /* A small multi-colour ribbon echoes the effect theme without competing with the matrix. */
+    for (int i = 0; i < 20; i++)
+        gfx_rect(12 + i * 14, 89, 12, 4, show_palette((uint8_t)(i + idx + now / 500u)));
+
+    static const char *const short_names[20] = {
+        "Rainbow Wave", "Aurora Veil", "Peacock Dance", "Fireworks",
+        "Starfield", "Plasma Clouds", "Digital Rain", "Flame Dance",
+        "Ocean Tide", "Butterfly", "Flower Bloom", "Spiral Galaxy",
+        "Meteor Shower", "Heart Pulse", "Neon Orbit", "Electric Storm",
+        "Confetti Party", "Rainbow Falls", "Firefly Garden", "Kaleidoscope"
+    };
+    for (int i = 0; i < count; i++) {
+        int col = i % 4, row = i / 4;
+        int x = 10 + col * 76, y = 100 + row * 22;
+        bool selected = (i == idx);
+        gfx_rect(x, y, 72, 19, selected ? UI_SURFACE_2 : UI_SURFACE);
+        gfx_rect_outline(x, y, 72, 19, selected ? UI_ACCENT : UI_BORDER);
+        gfx_text_small(x + 4, y + 6, short_names[i], selected ? UI_TEXT : UI_TEXT_2);
+    }
+    ui_draw_bottombar("LEFT/RIGHT: FX  A/START: AUTO  X: RANDOM  B: HOME", "MATRIX SHOW");
+    ui_mark_dirty_full();
 }

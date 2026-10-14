@@ -1,9 +1,9 @@
 /*
- * led_matrix.c - 120-LED RGB ARCADE MATRIX driver + diagnostics.
+ * led_matrix.c - 299-LED RGB ARCADE MATRIX driver + diagnostics.
  * Blueprint sections 3, 4, 12, 13, 14 Phase-A/B.
  *
- * - Static 120x3 framebuffer (360 bytes, DRAM). No malloc in loop.
- * - Serpentine XY mapper (even rows L->R, odd rows R->L).
+ * - Static 299x3 framebuffer (897 bytes, DRAM). No malloc in loop.
+ * - Custom 23x13 physical wiring map (NOT serpentine).
  * - Global brightness cap 72/255 enforced on every push.
  * - RMT non-DMA (rear strip owns DMA). Roof strip disabled (takeover).
  * - matrix_show() pacing caller-side (~30 FPS via led_matrix_tick).
@@ -51,8 +51,9 @@ static inline uint8_t scale8(uint8_t v, uint8_t b)
 int16_t matrix_xy_to_index(int16_t x, int16_t y)
 {
     if (x < 0 || x >= LED_MATRIX_W || y < 0 || y >= LED_MATRIX_H) return -1;
-    if ((y & 1) == 0) return (int16_t)(y * LED_MATRIX_W + x);
-    return (int16_t)(y * LED_MATRIX_W + (LED_MATRIX_W - 1 - x));
+    /* Physical 23x13 custom wiring map is NOT serpentine. */
+    uint16_t idx = matrix_xy_to_led_index((uint8_t)x, (uint8_t)y);
+    return idx == MATRIX_INVALID_LED_INDEX ? -1 : (int16_t)idx;
 }
 
 void matrix_set_brightness(uint8_t b)
@@ -84,10 +85,12 @@ uint8_t matrix_field_h(void) { return s_fh; }
    Portrait (x,y) <-> old (y, 9-x); serpentine of the fixed wiring. */
 static int16_t matrix_xy_to_index_portrait(int16_t x, int16_t y)
 {
+    /* Physical 23x13 map has no portrait serpentine. Only allow full
+       portrait geometry 13x23 and transpose visually into the same map. */
     if (x < 0 || x >= LED_MATRIX_H || y < 0 || y >= LED_MATRIX_W) return -1;
-    int16_t ox = y, oy = (int16_t)(9 - x);
-    if ((oy & 1) == 0) return (int16_t)(oy * LED_MATRIX_W + ox);
-    return (int16_t)(oy * LED_MATRIX_W + (LED_MATRIX_W - 1 - ox));
+    int16_t ox = y, oy = (int16_t)(LED_MATRIX_H - 1 - x);
+    uint16_t idx = matrix_xy_to_led_index((uint8_t)ox, (uint8_t)oy);
+    return idx == MATRIX_INVALID_LED_INDEX ? -1 : (int16_t)idx;
 }
 void matrix_set_idle(uint8_t m)
 {
@@ -108,6 +111,34 @@ void matrix_set_xy(int16_t x, int16_t y, uint8_t r, uint8_t g, uint8_t b)
 void matrix_set_xy_rgb(int16_t x, int16_t y, rgb_t c)
 {
     matrix_set_xy(x, y, c.r, c.g, c.b);
+}
+void matrix_add_xy(int16_t x, int16_t y, uint8_t r, uint8_t g, uint8_t b)
+{
+    int16_t i;
+    if (s_orient == MATRIX_ORIENT_PORTRAIT)
+        i = matrix_xy_to_index_portrait(x, y);
+    else
+        i = matrix_xy_to_index(x, y);
+    if (i < 0) return;
+    uint16_t nr = (uint16_t)s_fb[i][0] + r;
+    uint16_t ng = (uint16_t)s_fb[i][1] + g;
+    uint16_t nb = (uint16_t)s_fb[i][2] + b;
+    s_fb[i][0] = (uint8_t)(nr > 255u ? 255u : nr);
+    s_fb[i][1] = (uint8_t)(ng > 255u ? 255u : ng);
+    s_fb[i][2] = (uint8_t)(nb > 255u ? 255u : nb);
+}
+bool matrix_get_xy(int16_t x, int16_t y, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    int16_t i;
+    if (s_orient == MATRIX_ORIENT_PORTRAIT)
+        i = matrix_xy_to_index_portrait(x, y);
+    else
+        i = matrix_xy_to_index(x, y);
+    if (i < 0) return false;
+    if (r) *r = s_fb[i][0];
+    if (g) *g = s_fb[i][1];
+    if (b) *b = s_fb[i][2];
+    return true;
 }
 void matrix_clear(void)
 {
@@ -231,9 +262,9 @@ void led_matrix_init(void)
         .led_model = LED_MODEL_WS2812,
         .flags.invert_out = false,
     };
-    /* 120 LEDs: non-DMA (rear strip owns DMA). Roof hata di hai isliye
+    /* 299 LEDs: non-DMA (rear strip owns DMA). Roof hata di hai isliye
        channel free hai. 48 symbols = roof jaisa footprint (S3 RMT mem
-       4ch x 48 me fit); driver 120 LEDs ko chunk me bhejta hai. */
+       4ch x 48 me fit); driver 299 LEDs ko chunk me bhejta hai. */
     led_strip_rmt_config_t rc = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .resolution_hz = 10 * 1000 * 1000,
@@ -253,7 +284,7 @@ void led_matrix_init(void)
     s_ready = true;
     s_boot_t0 = (uint32_t)(esp_timer_get_time() / 1000);
     s_boot_step = 0;
-    ESP_LOGI(TAG, "matrix init OK: 12x10=120 LEDs GPIO%d bright=%d (cap %d)",
+    ESP_LOGI(TAG, "matrix init OK: 23x13=299 LEDs GPIO%d bright=%d (cap %d)",
              LED_MATRIX_GPIO, s_bright, MATRIX_MAX_BRIGHTNESS);
 }
 

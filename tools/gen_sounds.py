@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""gen_sounds.py - synthesize PART 5 sound bank: 16-bit PCM mono 16kHz .raw
-into spiffs/snd/. Run: python3 tools/gen_sounds.py. Total ~0.5MB (budget 1.25MB).
+"""gen_sounds.py - synthesize PART 5 sound bank: 16-bit PCM mono 22050Hz .raw
+into spiffs/snd/. Run: python3 tools/gen_sounds.py.
+
+SR MUST match the I2S engine rate in car.c (I2S_STD_CLK_DEFAULT_CONFIG(22050)).
+At the old 16 kHz every bank voice had to be resampled at runtime with
+nearest-neighbour (`ip = out * SND_BANK_RATE / 22050`), which duplicated
+~27% of output samples and dumped ~2.3x the image energy into the spectrum
+above 8 kHz - that is the "harsh / gritty" timbre. Generating at the native
+rate removes the resampler entirely: one index, one sample, zero cost.
 """
 import math, os, random, struct
 
-SR = 16000
+SR = 22050
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "spiffs", "snd")
 os.makedirs(OUT, exist_ok=True)
@@ -12,7 +19,7 @@ random.seed(0xC0FFEE)
 
 
 def env(n, attack=0.005, decay_pow=2.2):
-    a = max(1, int(n * attack / (n / SR)) if False else int(SR * attack))
+    a = max(1, int(SR * attack))
     out = []
     for i in range(n):
         x = i / n

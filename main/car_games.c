@@ -6,11 +6,17 @@
 #include "cargame_neon_serpent.h"
 #include "cargame_neon_convoy.h"
 #include "game_serpent.h"
+#include "game_neon_raid.h"
+#include "game_neon_breaker.h"
+#include "game_runner.h"
 
 const os_game_t OS_GAMES[OS_GAME_COUNT] = {
     { "NEON CONVOY",  "SENTINEL", ncr_init, ncr_update, ncr_draw },
     { "NEON SERPENT", "SNAKE",   g7_init,  g7_update,  g7_draw  },
-    { "MATRIX SNAKE", "120 LED", serpent_mx_init, serpent_mx_update, serpent_mx_draw },
+    { "MATRIX SNAKE", "299 LED", serpent_mx_init, serpent_mx_update, serpent_mx_draw },
+    { "NEON RAID",   "CORE BREACH", neon_raid_mx_init, neon_raid_mx_update, neon_raid_mx_draw },
+    { "NEON BREAKER", "CORE WAR", neon_breaker_mx_init, neon_breaker_mx_update, neon_breaker_mx_draw },
+    { "NEON RUNNER", "PLATFORM", runner_mx_init, runner_mx_update, runner_mx_draw },
 };
 
 void car_games_all_init(void)

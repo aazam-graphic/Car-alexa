@@ -1,18 +1,20 @@
 /*
- * led_matrix.h - 120-LED RGB ARCADE MATRIX (blueprint STEP 3+4).
+ * led_matrix.h - 299-LED RGB ARCADE MATRIX (blueprint STEP 3+4).
  *
- * Hardware: 12x10 = 120 WS2812B, serpentine/zig-zag, DIN -> GPIO18.
+ * Hardware: 23x13 = 299 WS2812B, custom wiring map (see matrix_layout_23x13_299.h),
+ * DIN -> GPIO18.
  * Room/roof WS2812 (roof_light.c) test ke liye NIKALA gaya hai taaki
  * GPIO18 + ek RMT channel free ho (S3 par RMT channels limited hain).
  *
  * Power (blueprint 3.3, MUST follow):
  *   5V 8A min (10A recommended), injection start+end, common GND,
  *   1000uF cap at LED1, 330-470ohm data resistor, level-shifter 74AHCT125.
- *   Kabhi ESP32 USB se 120 LEDs power mat do.
+ *   Kabhi ESP32 USB se 299 LEDs power mat do.
  */
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include "matrix_layout_23x13_299.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,9 +24,9 @@ extern "C" {
 #define LED_MATRIX_TAKEOVER_ROOF  1
 
 #define LED_MATRIX_GPIO   18
-#define LED_MATRIX_W      12
-#define LED_MATRIX_H      10
-#define LED_MATRIX_COUNT  (LED_MATRIX_W * LED_MATRIX_H)  /* 120 */
+#define LED_MATRIX_W      MATRIX_WIDTH
+#define LED_MATRIX_H      MATRIX_HEIGHT
+#define LED_MATRIX_COUNT  MATRIX_LED_COUNT
 
 /* brightness safety cap (blueprint 3.4): 72/255 ~= 28% */
 #define MATRIX_MAX_BRIGHTNESS 72
@@ -46,12 +48,17 @@ void led_matrix_deinit(void);        /* clear + free RMT (roof wapas chahiye to)
 bool led_matrix_ready(void);
 bool led_matrix_is_active(void);     /* takeover active? (roof_light yield check) */
 
-/* XY mapper (blueprint 4): x=0..11 left->right, y=0..9 top->bottom */
+/* XY mapper (blueprint 4): x=0..22 left->right, y=0..12 top->bottom,
+   translated via the custom 23x13 physical map */
 int16_t matrix_xy_to_index(int16_t x, int16_t y);
 
 /* frame API: sirf mapper se likho, raw index mat use karo */
 void matrix_set_xy(int16_t x, int16_t y, uint8_t r, uint8_t g, uint8_t b);
 void matrix_set_xy_rgb(int16_t x, int16_t y, rgb_t c);
+/* additive blend (saturating) - glow/particles ke liye, same mapper */
+void matrix_add_xy(int16_t x, int16_t y, uint8_t r, uint8_t g, uint8_t b);
+/* read back one logical pixel (afterglow compositor ke liye) */
+bool matrix_get_xy(int16_t x, int16_t y, uint8_t *r, uint8_t *g, uint8_t *b);
 void matrix_clear(void);
 void matrix_show(void);              /* brightness-scaled push, max ~30 FPS caller pacing */
 
@@ -61,8 +68,8 @@ uint8_t matrix_get_brightness(void);
 /* percent 1..100 mapped onto the cap (100% = full cap) */
 void matrix_set_brightness_pct(uint8_t pct);
 
-/* orientation: LANDSCAPE 12x10, PORTRAIT 10x12 (vertical strip).
-   Portrait = exact transpose remap, zero crop, all 120 LEDs. */
+/* orientation: LANDSCAPE 23x13, PORTRAIT 13x23 (vertical strip).
+   Portrait = exact transpose remap, zero crop, all 299 LEDs. */
 #define MATRIX_ORIENT_LANDSCAPE 0
 #define MATRIX_ORIENT_PORTRAIT  1
 void matrix_set_orient(uint8_t o);
@@ -82,7 +89,7 @@ uint8_t matrix_get_idle(void);
 void led_matrix_safe_off(void);      /* immediate clear + show */
 void led_matrix_set_dim(bool dim);   /* disconnect: 10% + red border pulse */
 /* ownership: FALAK idle show vs ARCADE game (never both draw) */
-typedef enum { OWNER_FALAK = 0, OWNER_ARCADE, OWNER_DIAG } matrix_owner_t;
+typedef enum { OWNER_FALAK = 0, OWNER_ARCADE, OWNER_DIAG, OWNER_SHOW } matrix_owner_t;
 bool led_matrix_acquire(matrix_owner_t o);   /* false if taken */
 void led_matrix_release(matrix_owner_t o);   /* back to FALAK idle */
 matrix_owner_t led_matrix_owner(void);

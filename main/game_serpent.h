@@ -1,44 +1,35 @@
 /*
- * game_serpent.h - NEON SERPENT ARENA on 120-LED matrix (blueprint Game 1).
+ * game_serpent.h - NEON SERPENT V2 on the 120-LED RGB matrix.
  *
- * Entry: BACK hold 1s while parked (STANDBY/HOME...), no TFT game, no estop.
- * While active the arcade OWNS the controller: car.c skips input_handle
- * and forces motors 0. GUIDE is never consumed (car E-STOP always runs).
+ * Matrix: 12x10 landscape / 10x12 portrait.
+ * Gameplay: Y=UP, A=DOWN, X=LEFT, B=RIGHT.
+ * D-pad, sticks, LT/RT and LB/RB are ignored during gameplay.
+ * START pause/resume; BACK tap menu, BACK hold exit; GUIDE remains E-STOP.
  */
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
 #include "xbox360.h"
+#include "led_matrix.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void serpent_arcade_init(void);   /* NVS hiscore load, idempotent */
-bool serpent_arcade_active(void); /* MENU/COUNTDOWN/PLAYING/PAUSED/GAME_OVER */
-
-/* Call every car_task loop BEFORE input_handle.
- * Returns true = input consumed (skip car controls, motors stay 0). */
+void serpent_arcade_init(void);
+bool serpent_arcade_active(void);
 bool serpent_arcade_route(const xbox360_pad_t *pad, uint16_t dig,
                           uint16_t tap, uint32_t now_ms);
-
-/* rumble mode 0 OFF 1 SOFT 2 FULL (NVS arcade/rumble, SETTINGS item) */
-uint8_t serpent_rumble_mode(void);
-void serpent_set_rumble_mode(uint8_t m);
-
-/* hi-score for HOME tile + hub (serp_hi2, full runs only) */
-uint32_t serpent_hiscore(void);
-
-/* arcade state for OLED gating / stats (ARC_* as uint8) */
-uint8_t serpent_arcade_state(void);
-/* true in COUNTDOWN/INTRO/PLAY/DYING/RETRY/CLEAR: skip periodic OLED redraw */
-bool serpent_suppress_oled(void);
-
-/* per-loop game progression (steps/timers/renders). Caller-independent:
-   input handling stays in serpent_arcade_route. */
 void serpent_arcade_tick(uint32_t now_ms);
 
-/* TFT companion snapshot (same car_task, no lock needed) */
+uint8_t serpent_rumble_mode(void);
+void serpent_set_rumble_mode(uint8_t m);
+uint32_t serpent_hiscore(void);
+uint8_t serpent_arcade_state(void);
+bool serpent_suppress_oled(void);
+bool serpent_arcade_open(void);
+
+/* TFT companion snapshot. Same car_task context: no heap, no lock required. */
 typedef struct {
     uint8_t  state;
     uint32_t score, hi;
@@ -53,21 +44,24 @@ typedef struct {
     uint8_t  fw, fh;                 /* matrix field (12x10 / 10x12) */
     uint8_t  winfx;                  /* WIN_BOARD wipe active */
     uint8_t  pad_lost;               /* controller disconnected mid-arcade */
-    uint8_t  frame_rgb[120][3];   /* logical index order */
-    uint32_t mirror_dirty[4];     /* 120-bit, reader clears after redraw */
+    uint8_t  food_x, food_y;         /* next food cell */
+    uint8_t  frame_rgb[MATRIX_LED_COUNT][3];  /* logical index order */
+    uint32_t mirror_dirty[(MATRIX_LED_COUNT + 31u) / 32u]; /* 299-bit */
+    /* V2 analytics/gameplay state */
+    uint8_t  combo, multiplier, max_combo;
+    uint8_t  power, shield, slow, ghost;
+    uint16_t power_ms_left;
+    uint32_t foods_total, longest_len;
+    uint32_t play_time_ms, level_time_ms;
+    uint32_t level_score, bonuses;
 } serpent_status_t;
-void serpent_arcade_get_status(serpent_status_t *out);
 
-/* Games-Hub registry stubs (TFT game flow needs init/update/draw;
-   the real game runs on the matrix via route/tick) */
+/* Legacy Games-Hub ABI kept intentionally; real V2 gameplay is matrix route/tick. */
 void serpent_mx_init(void);
 void serpent_mx_update(const xbox360_pad_t *pad, uint32_t now_ms);
 void serpent_mx_draw(uint32_t now_ms);
 
-/* open from Games Hub / HOME tile. Checks preconditions
-   (matrix ready, no estop, pad paired, parked, no TFT game).
-   True = arcade MENU entered. */
-bool serpent_arcade_open(void);
+void serpent_arcade_get_status(serpent_status_t *out);
 
 #ifdef __cplusplus
 }
