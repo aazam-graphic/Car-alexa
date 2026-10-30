@@ -19,6 +19,19 @@ CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 # malloc() stays internal; PSRAM only via explicit heap_caps_malloc(MALLOC_CAP_SPIRAM)
 # (USB-OTG DMA cannot reach PSRAM - avoids USB stack corruption)
 CONFIG_SPIRAM_USE_CAPS_ALLOC=y
-CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+# Board is N16R8 (8MB PSRAM verified at boot). Do NOT ignore a missing PSRAM:
+# that Kconfig path also disables SPIRAM_TRY_ALLOCATE_WIFI_LWIP below.
+# CONFIG_SPIRAM_IGNORE_NOTFOUND is not set
+# Internal DRAM is tight/fragmented after USB+TFT+audio init (~23 KB free,
+# largest block ~7 KB). WiFi needs contiguous buffers, so allocate WiFi/LWIP
+# buffers from PSRAM first and fall back to internal memory.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+# SNTP-only workload: keep WiFi buffers modest (scan/connect/UDP is enough).
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=2
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=2
+CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM=2
+CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF=3
+CONFIG_ESP_WIFI_MGMT_SBUF_NUM=6
 # Task stacks MUST stay internal (ISR on PSRAM stack = crash on S3)
 # CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY is not set

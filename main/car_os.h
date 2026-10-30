@@ -6,6 +6,7 @@
  * reads g.* (car_global.h) and draws into the TFT framebuffer.
  */
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "xbox360.h"
@@ -50,6 +51,12 @@ typedef enum {
     OS_STANDBY,        /* CLOCK/STANDBY: table clock, parked, START-only */
     OS_DRIVE_ARMING,   /* DRIVE pre-stage: 1.3 s anim+chime, neutral gate */
     OS_MATRIX_SHOW,    /* 299 LED matrix effects chooser */
+    OS_LIGHT_STUDIO,   /* v12: light configurator */
+    OS_MEGAPHONE,      /* v12: megaphone & voice */
+    OS_GYRO_LAB,       /* v12: gyro motion lab */
+    OS_AUTOPILOT,      /* v12: AI autopilot */
+    OS_MIST_TURBO,     /* v12: mist & turbo */
+    OS_GHOST_DVR,      /* v12: ghost DVR */
 } os_state_t;
 
 /* unified input context (premium guide Â§3) - single source of truth. car.c

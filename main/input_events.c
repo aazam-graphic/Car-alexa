@@ -4,6 +4,7 @@
  * 15 digital buttons tracked (B_* masks). Sticks/triggers are analog and are
  * handled by the drive logic, not here.
  */
+#include <stddef.h>
 #include "input_events.h"
 #include "car_global.h"       /* B_* button masks */
 

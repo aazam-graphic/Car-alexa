@@ -370,11 +370,15 @@ void tft_init(void) {
     s_io = io_handle;
     s_ready = true;
     // allocate framebuffer for flicker-free game (single push per frame)
-    s_fb = (uint16_t*)heap_caps_malloc(TFT_H_RES*TFT_V_RES*2, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    // Oct 2026: FB lives in PSRAM. It is only a CPU-side source buffer; every
+    // SPI DMA transfer still goes through the internal 32 KB s_rowbuf, so the
+    // panel DMA never touches PSRAM. Keeping the 150 KB FB out of internal
+    // DRAM leaves room for WiFi + I2S DMA (audio was failing to allocate).
+    s_fb = (uint16_t*)heap_caps_malloc(TFT_H_RES*TFT_V_RES*2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_fb) ESP_LOGI(TAG,"TFT FB in PSRAM %d bytes", TFT_H_RES*TFT_V_RES*2);
     if (!s_fb) {
-        // fallback: try PSRAM (DMA capable on S3) then internal non-DMA
-        s_fb = (uint16_t*)heap_caps_malloc(TFT_H_RES*TFT_V_RES*2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (s_fb) ESP_LOGW(TAG,"TFT FB DMA FAIL -> PSRAM fallback %d bytes", TFT_H_RES*TFT_V_RES*2);
+        s_fb = (uint16_t*)heap_caps_malloc(TFT_H_RES*TFT_V_RES*2, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+        if (s_fb) ESP_LOGW(TAG,"TFT FB PSRAM FAIL -> internal DMA %d bytes", TFT_H_RES*TFT_V_RES*2);
     }
     if (!s_fb) s_fb = (uint16_t*)heap_caps_malloc(TFT_H_RES*TFT_V_RES*2, MALLOC_CAP_8BIT);
     if(s_fb) ESP_LOGI(TAG,"TFT FB allocated %d bytes", TFT_H_RES*TFT_V_RES*2);

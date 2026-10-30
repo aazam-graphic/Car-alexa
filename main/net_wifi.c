@@ -10,7 +10,9 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_netif.h"
+#include "esp_netif_ip_addr.h"
 #include "esp_netif_sntp.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
@@ -33,6 +35,11 @@ static uint32_t s_sync_ms = 0;       /* SNTP lock timestamp (for wifi-off) */
 static uint32_t s_start_ms = 0;      /* start timestamp (90 s give-up) */
 static uint32_t s_last_save_ms = 0;  /* 60 s epoch save cadence */
 static bool s_wifi_off = false;
+static bool s_sntp_up = false;       /* SNTP client currently initialized */
+static int  s_sntp_try = 0;          /* server fallback index */
+static uint32_t s_sntp_ms = 0;       /* last SNTP start (retry cadence) */
+
+static void start_sntp(void);
 
 static uint32_t wifi_now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -71,6 +78,19 @@ static void handle_connect(void)
     s_state = NET_WIFI_UP;
     xEventGroupSetBits(s_evt, NET_CONNECT_BIT);
     ESP_LOGI(TAG, "connected, IP assigned");
+    esp_netif_t *nif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (nif) {
+        esp_netif_dns_info_t d;
+        char ip[16] = "?";
+        if (esp_netif_get_dns_info(nif, ESP_NETIF_DNS_MAIN, &d) == ESP_OK &&
+            d.ip.u_addr.ip4.addr != 0) {
+            esp_ip4addr_ntoa(&d.ip.u_addr.ip4, ip, sizeof(ip));
+            ESP_LOGI(TAG, "DNS main: %s", ip);
+        }
+    }
+    /* SNTP only AFTER DHCP: lwIP resolves the server through the DHCP DNS.
+       Starting it before GOT_IP silently fails to resolve pool.ntp.org. */
+    if (!s_time_ok && !s_sntp_up) start_sntp();
 }
 
 /* Timer callback: runs on esp_timer task - just kick a connect. */
@@ -126,12 +146,26 @@ static void start_sntp(void)
        localtime_r() so the standby clock reads IST, not UTC. */
     setenv("TZ", "IST-5:30", 1);
     tzset();
-    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    /* After DHCP the DNS works, so pool.ntp.org is tried first. Direct-IP
+       servers are the fallback when DNS/UDP-123 is filtered by the router. */
+    static const char *servers[] = {
+        "pool.ntp.org",     /* index 0 — first try, already attempted at boot */
+        "216.239.35.0",     /* time.google.com */
+        "162.159.200.1",    /* time.cloudflare.com */
+    };
+    if (s_sntp_try < 0) s_sntp_try = 0;
+    if (s_sntp_try > 3) s_sntp_try = 3;   /* safety; actual max used is 2 */
+    ESP_LOGI(TAG, "SNTP try %d: %s", s_sntp_try + 1, servers[s_sntp_try]);
+    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG(servers[s_sntp_try]);
     cfg.sync_cb = time_sync_cb;
     esp_err_t e = esp_netif_sntp_init(&cfg);
     if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "sntp init err %s", esp_err_to_name(e));
+        s_sntp_up = false;
+        return;
     }
+    s_sntp_up = true;
+    s_sntp_ms = wifi_now_ms();
     /* NOTE: lwIP SNTP default re-syncs hourly in background (drift
        correction) — no extra timer needed. */
 }
@@ -175,8 +209,38 @@ esp_err_t net_wifi_start(void)
 
     esp_netif_create_default_wifi_sta();
 
+    /* WiFi buffers are mostly PSRAM-backed (SPIRAM_TRY_ALLOCATE_WIFI_LWIP).
+       Only the static RX pool needs DMA-capable internal RAM; the TFT
+       framebuffer now lives in PSRAM, so internal DRAM has ~150 KB free here.
+       AMPDU is off because this link only carries SNTP + small control
+       traffic. Counts are kept low so boot works even under fragmentation. */
     wifi_init_config_t icfg = WIFI_INIT_CONFIG_DEFAULT();
+#ifdef CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
+    /* SNTP-only: minimum buffers that still scan/connect reliably. Static
+       esf buffers must come from DMA-capable internal RAM; keeping their
+       count low avoids the "esf_buf_setup_static: alloc eb fail" abort. */
+    icfg.static_rx_buf_num  = 2;
+    icfg.dynamic_rx_buf_num = 6;
+    icfg.static_tx_buf_num  = 2;
+    icfg.dynamic_tx_buf_num = 8;
+    icfg.cache_tx_buf_num   = 2;
+    icfg.rx_mgmt_buf_num    = 3;
+    icfg.mgmt_sbuf_num      = 6;
+    icfg.ampdu_rx_enable    = 0;
+    icfg.ampdu_tx_enable    = 0;
+#endif
+    ESP_LOGI(TAG, "heap before WiFi: int=%uK(max %uK) dma=%uK(max %uK) psram=%uK",
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_DMA) / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_DMA) / 1024),
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
     er = esp_wifi_init(&icfg);
+    ESP_LOGI(TAG, "esp_wifi_init=%s, heap int=%uK(max %uK) psram=%uK",
+             esp_err_to_name(er),
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
     if (er != ESP_OK && er != ESP_ERR_INVALID_STATE) return er;
 
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
@@ -192,7 +256,7 @@ esp_err_t net_wifi_start(void)
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_set_config(WIFI_IF_STA, &cfg);
     esp_wifi_start();
-    start_sntp();
+    /* SNTP is started from handle_connect() (after GOT_IP). */
     s_started = true;
     s_start_ms = wifi_now_ms();
     /* last known epoch for the instant boot clock */
@@ -219,6 +283,15 @@ time_t net_wifi_last_known(void)          { return s_last_known; }
 void net_wifi_poll(uint32_t now_ms)
 {
     if (!s_started || s_wifi_off) return;
+    /* SNTP server fallback: har server ko 20 s dein, phir agla (DNS/UDP-123
+       blocked hone par). Pool pehle hi try ho chuka hai (boot ke waqt start_sntp()),
+       isliye ab Google → Cloudflare aur baad kuch nahi. */
+    if (!s_time_ok && s_sntp_up && s_sntp_try < 3 &&
+        (uint32_t)(now_ms - s_sntp_ms) >= 20000) {
+        esp_netif_sntp_deinit();
+        s_sntp_up = false;
+        start_sntp();
+    }
     /* one-time: persist working creds to NVS (car_task context) */
     static bool s_cred_done = false;
     if (!s_cred_done && s_state == NET_WIFI_UP) {

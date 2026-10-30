@@ -50,6 +50,7 @@
 #include "car_os.h"
 #include "input_events.h"
 #include "roof_light.h"
+#include "c3_receiver_s3.h"
 #include "led_matrix.h"   /* 120-LED arcade matrix on GPIO18 (room LED removed for test) */
 #include "game_serpent.h" /* NEON SERPENT arena on matrix (owns input while active) */
 #include "game_neon_raid.h" /* NEON RAID matrix arena */
@@ -274,6 +275,19 @@ static void settings_nvs_load(void)
     if (nvs_get_u32(h, "mx_ori", &v) == ESP_OK && v <= 1) s_set_mx_ori = (uint8_t)v;
     if (nvs_get_u32(h, "mx_idle", &v) == ESP_OK && v <= 2) s_set_mx_idle = (uint8_t)v;
     if (nvs_get_u32(h, "mx_fx", &v) == ESP_OK && v <= 1) s_set_mx_fx = (uint8_t)v;
+    if (nvs_get_u32(h, "clk_st", &v) == ESP_OK && v <= 4) g.clk_style = (uint8_t)v;
+    {
+        uint32_t qk = 0;
+        if (nvs_get_u32(h, "qk", &qk) == ESP_OK) {
+            g.auto_gear   = (qk & (1u << 0)) != 0;
+            g.gyro_steer  = (qk & (1u << 1)) != 0;
+            g.vr_gimbal   = (qk & (1u << 2)) != 0;
+            g.smart_turn  = (qk & (1u << 3)) != 0;
+            g.smart_drl   = (qk & (1u << 4)) != 0;
+            g.auto_mist   = (qk & (1u << 5)) != 0;
+            g.table_fire  = (qk & (1u << 6)) != 0;
+        }
+    }
 
     uint32_t ver = 0;
     bool gears_valid = false;
@@ -325,6 +339,18 @@ static void settings_nvs_save(void)
     nvs_set_u32(h, "mx_ori", s_set_mx_ori);
     nvs_set_u32(h, "mx_idle", s_set_mx_idle);
     nvs_set_u32(h, "mx_fx", s_set_mx_fx);
+    nvs_set_u32(h, "clk_st", g.clk_style);
+    {
+        uint32_t qk = 0;
+        if (g.auto_gear)   qk |= (1u << 0);
+        if (g.gyro_steer)  qk |= (1u << 1);
+        if (g.vr_gimbal)   qk |= (1u << 2);
+        if (g.smart_turn)  qk |= (1u << 3);
+        if (g.smart_drl)   qk |= (1u << 4);
+        if (g.auto_mist)   qk |= (1u << 5);
+        if (g.table_fire)  qk |= (1u << 6);
+        nvs_set_u32(h, "qk", qk);
+    }
     nvs_set_u32(h, "ver", SETTINGS_VER);          /* schema version for migration */
     uint32_t gp = 0;
     for (int i = 0; i < CAR_GEAR_COUNT; i++) gp |= ((uint32_t)s_gear_caps[i] & 0xFF) << (8 * i);
@@ -652,24 +678,27 @@ static void strip_update(uint32_t now)
                 fr = 255; fg = 0; fb = 0;
             }
         } else {
-            /* base color: headlight white, otherwise off */
+            /* base color: headlight white, otherwise (switchback) ice white or off */
             if (g.headlight) {
                 fl_r = 255; fl_g = 255; fl_b = 255;
                 fr = 255; fg = 255; fb = 255;
+            } else if (g.smart_drl) {
+                fl_r = 130; fl_g = 150; fl_b = 180;
+                fr = 130; fg = 150; fb = 180;
             }
-            /* indicator overrides: orange blink (ON phase) / off (OFF phase) */
+            /* indicator overrides: true amber blink */
             if (sig_l) {
                 if (blink) {
-                    fl_r = 255; fl_g = 120; fl_b = 0; // Orange ON
+                    fl_r = 255; fl_g = 110; fl_b = 0;
                 } else {
-                    fl_r = 0; fl_g = 0; fl_b = 0;     // OFF phase (dark)
+                    fl_r = 0; fl_g = 0; fl_b = 0;
                 }
             }
             if (sig_r) {
                 if (blink) {
-                    fr = 255; fg = 120; fb = 0; // Orange ON
+                    fr = 255; fg = 110; fb = 0;
                 } else {
-                    fr = 0; fg = 0; fb = 0;     // OFF phase (dark)
+                    fr = 0; fg = 0; fb = 0;
                 }
             }
         }
@@ -681,7 +710,19 @@ static void strip_update(uint32_t now)
         else { gpio_set_level(PIN_FRONT_LED_R, (fr || fg || fb) ? 1 : 0); }
     }
 
-    if (g.hazard) {
+    if (g.ess_strobe) {
+        if ((int32_t)(g.ess_until - now) > 0) {
+            uint16_t ess_blink = (now / 100) & 1;
+            if (ess_blink) { strip_px(0, 255, 0, 0); strip_px(1, 255, 0, 0); }
+            else { strip_px(0, 0, 0, 0); strip_px(1, 0, 0, 0); }
+            led_strip_refresh(s_strip);
+            gpio_set_level(PIN_REAR_LIGHT, ess_blink ? 0 : 1);
+        } else {
+            g.ess_strobe = false;
+            strip_px(0, 255, 0, 0); strip_px(1, 255, 0, 0);
+            led_strip_refresh(s_strip);
+        }
+    } else if (g.hazard) {
         if (fast) {
             strip_px(0, 255, 0, 0); strip_px(1, 255, 0, 0);
         } else {
@@ -767,15 +808,18 @@ static void strip_update(uint32_t now)
         if (g.hazard) {
             under_set_all(blink ? 255 : 0, 0, 0);
         } else if (sig_l || sig_r) {
-            uint8_t r0 = 0, g0 = 0, b0 = 0;
-            if (blink) { r0 = 255; g0 = 120; b0 = 0; }
+            uint8_t r0 = 255, g0 = 110, b0 = 0;
             for (int i = 0; i < UNDER_STRIP_NUM; i++) {
-                uint8_t r = (sig_l && i < 6) ? r0 : 0;
-                uint8_t g = (sig_r && i >= 6) ? g0 : 0;
-                uint8_t b = (sig_l || sig_r) ? b0 : 0;
+                uint8_t r = 0, g = 0, b = 0;
+                if (sig_l && i < 6) { r = r0; g = g0; b = b0; }
+                else if (sig_r && i >= 6) { r = r0; g = g0; b = b0; }
+                if (blink) { /* blink handled by r0 already on */ }
+                else { r = 0; g = 0; b = 0; }
                 under_px(i, r, g, b);
             }
             led_strip_refresh(s_under);
+        } else if (g.reversing) {
+            under_set_all(255, 255, 255);
         } else if (s_under_solo) {
             under_set_all(255, 255, 255);
         } else if (g.led_mode == 1) {
@@ -2667,7 +2711,7 @@ static void auto_logic(const xbox360_pad_t *pad, uint32_t now)
             else { g.ast = AST_REVERSE; rumble(255,255,300); }
             if (g.ast == AST_TURN_L || g.ast == AST_TURN_R) rumble(0,180,200);
             g.ast_t0 = now; g.prog_f = 65535;
-        } else if (f > 100) {
+        } else if (f > 135) {
             g.ast = AST_CRUISE;
             g.ast_t0 = now;
             g.prog_f = 65535;
@@ -2844,8 +2888,8 @@ static void auto_logic(const xbox360_pad_t *pad, uint32_t now)
     // cap 20% max
     if(spd>20) spd=20;
     if(spd<-20) spd=-20;
-    if(st>20) st=20;
-    if(st<-20) st=-20;
+    if(st>100) st=100;
+    if(st<-100) st=-100;
     // adaptive + NVS (bina encoder ke bhi)
     advAdaptiveTick(now, (uint32_t)f, f<15, g.ast==AST_STUCK);
     if(now % 60000 < 40) advNvsSave(now);
@@ -2923,6 +2967,14 @@ static void manual_logic(const xbox360_pad_t *pad, uint16_t dig, uint32_t now)
     float st = s_st_s;
     st = st * st * st; /* steering curve: halka = soft */
 
+    /* v12: gyro tilt-steer override (C3 roll -> steering) */
+    if (g.gyro_steer && g.c3_connected) {
+        float roll = g.c3_roll; /* -90..+90 */
+        if (roll > 45.0f) roll = 45.0f;
+        if (roll < -45.0f) roll = -45.0f;
+        st = roll / 45.0f;
+    }
+
     /* RT (Right Trigger): PROPORTIONAL to gear cap ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â halka dabao = low % of gear,
        poore dabao = full gear %. Gear1(5%) me 50% RT = 2.5% speed, 100% RT = 5% */
     float cap_raw = pad->rt / 255.0f;
@@ -2989,6 +3041,24 @@ static void manual_logic(const xbox360_pad_t *pad, uint16_t dig, uint32_t now)
         tR = -1.0f;
     }
 
+    /* v12: VR gimbal servo aiming from C3 */
+    if (g.vr_gimbal && g.c3_connected) {
+        int16_t a1 = (int16_t)(90 + (int32_t)g.c3_roll * 2);   /* pan */
+        int16_t a2 = (int16_t)(90 - (int32_t)g.c3_pitch * 2);  /* tilt */
+        if (a1 < 0) a1 = 0;
+        if (a1 > 180) a1 = 180;
+        if (a2 < 0) a2 = 0;
+        if (a2 > 180) a2 = 180;
+        servo_deg(LEDC_CHANNEL_0, (uint16_t)a1);
+        servo_deg(LEDC_CHANNEL_1, (uint16_t)a2);
+    } else if (!g.vr_gimbal) {
+        /* default: pan looks into corners with steering (only if right stick centered) */
+        if (stick_dz(pad->rx) == 0 && stick_dz(pad->ry) == 0) {
+            servo_deg(LEDC_CHANNEL_0, (uint16_t)(90 - (int)st * 35));
+            servo_deg(LEDC_CHANNEL_1, 90);
+        }
+    }
+
     g.tgt_l = (int16_t)(tL * cap * 100.0f);
     g.tgt_r = (int16_t)(tR * cap * 100.0f);
 
@@ -2998,13 +3068,72 @@ static void manual_logic(const xbox360_pad_t *pad, uint16_t dig, uint32_t now)
         g.tgt_l = 0;
         g.tgt_r = 0;
     }
+    /* v12: ESS trigger on hard brake from >45% speed */
+    if (lt > 200 && !g.ess_strobe && (abs(g.cur_l) > 45 || abs(g.cur_r) > 45)) {
+        g.ess_strobe = true;
+        g.ess_until = now + 900;
+    }
+    /* v12: auto-gear (D/M) */
+    if (g.auto_gear) {
+        static uint32_t s_hold_ms = 0;
+        if (cap_raw > 0.82f && f > 55) {
+            if (s_hold_ms == 0) s_hold_ms = now;
+            if (now - s_hold_ms > 850 && g.gear < CAR_GEAR_COUNT - 1) {
+                g.gear++;
+                snd_play("gear_shift_up");
+                if (g.auto_mist) { g.mist = true; }
+                s_hold_ms = now;
+            }
+        } else {
+            s_hold_ms = 0;
+            if (cap_raw < 0.2f && g.gear > 0) {
+                g.gear--;
+            }
+        }
+    }
+    /* v12: adaptive cruise control */
+    if (g.cruise_on) {
+        if (lt > 200) {
+            g.cruise_on = false;
+        } else {
+            float target = g.cruise_spd / 100.0f;
+            if (f < 60 && f != 65535) target *= 0.5f;
+            if (f < 30 && f != 65535) target = 0.0f;
+            cap = target;
+            th = 1.0f;
+            if (th < 0) th = 0;
+        }
+    }
+    if (g.smart_turn) {
+        static uint32_t s_turn_start = 0;
+        static uint32_t s_center_start = 0;
+        int16_t lx_raw = stick_dz(pad->lx);
+        float lx_pct = (float)lx_raw / STICK_MAX;
+        if (fabsf(lx_pct) > 0.65f && (abs(g.cur_l) > 5 || abs(g.cur_r) > 5)) {
+            if (s_turn_start == 0) s_turn_start = now;
+            if (now - s_turn_start > 350) {
+                if (lx_pct > 0) { g.sig_r = true; g.sig_l = false; }
+                else { g.sig_l = true; g.sig_r = false; }
+            }
+            s_center_start = 0;
+        } else if (fabsf(lx_pct) < 0.15f) {
+            if (s_center_start == 0) s_center_start = now;
+            if (s_turn_start != 0 && now - s_center_start > 1200) {
+                g.sig_l = false; g.sig_r = false;
+                s_turn_start = 0;
+            }
+        } else {
+            s_turn_start = 0;
+            s_center_start = 0;
+        }
+    }
 
     // gyro assist removed (MPU6050 not used)
 
     g.reversing = th < -0.02f && cap > 0.01f;
 
     /* mist: A hold = toggle ON rehta hai; reverse me auto */
-    g.mist = s_mist_tog || g.reversing;
+    g.mist = s_mist_tog || g.reversing || (g.auto_mist && g.turbo);
 
     /* cannon: right stick pan/tilt (RS click se recenter) + RX/RY par halki tick */
     static uint32_t s_cannon_snd_t;
@@ -3301,6 +3430,23 @@ void car_set_gear_cap(uint8_t i, uint8_t v)
 void car_settings_save(void) { settings_nvs_save(); }
 
 void car_cycle_gear(void) { g.gear = (uint8_t)((g.gear + 1) % CAR_GEAR_COUNT); }
+/* v12 smart automation toggles */
+bool car_get_auto_gear(void) { return g.auto_gear; }
+void car_set_auto_gear(bool v) { g.auto_gear = v; }
+bool car_get_gyro_steer(void) { return g.gyro_steer; }
+void car_set_gyro_steer(bool v) { g.gyro_steer = v; }
+bool car_get_vr_gimbal(void) { return g.vr_gimbal; }
+void car_set_vr_gimbal(bool v) { g.vr_gimbal = v; }
+bool car_get_smart_turn(void) { return g.smart_turn; }
+void car_set_smart_turn(bool v) { g.smart_turn = v; }
+bool car_get_smart_drl(void) { return g.smart_drl; }
+void car_set_smart_drl(bool v) { g.smart_drl = v; }
+bool car_get_auto_mist(void) { return g.auto_mist; }
+void car_set_auto_mist(bool v) { g.auto_mist = v; }
+bool car_get_table_fire(void) { return g.table_fire; }
+void car_set_table_fire(bool v) { g.table_fire = v; }
+uint8_t car_get_clk_style(void) { return g.clk_style; }
+void car_set_clk_style(uint8_t v) { if (v < 5) g.clk_style = v; }
 
 uint8_t car_speed_cap_pct(void)
 {
@@ -3669,6 +3815,86 @@ void car_task(void *arg)
     while (1) {
         uint32_t now = now_ms();
         uint32_t dt_ms = last_loop_ms ? now - last_loop_ms : LOOP_MS;
+        /* v12: refresh C3 handheld link cache */
+        {
+            static uint32_t s_last_c3_seq = 0;
+            const c3_link_state_t *cs = c3_link_state();
+            g.c3_connected = c3_link_connected();
+            if (g.c3_connected && cs) {
+                g.c3_roll = cs->last.roll_deg;
+                g.c3_pitch = cs->last.pitch_deg;
+                g.c3_yaw = cs->last.yaw_deg_x10 / 10.0f;
+                g.c3_gestures = cs->last.gestures;
+                g.c3_mic_evt = cs->last.mic_evt;
+                memcpy(g.c3_spectrum, cs->last.spectrum, 23);
+                g.c3_last_rx = cs->last_rx_ms;
+
+                /* one-shot event handling on new packet */
+                if (cs->seq != s_last_c3_seq) {
+                    s_last_c3_seq = cs->seq;
+                    uint8_t gest = cs->last.gestures;
+                    uint8_t evt = cs->last.mic_evt;
+
+                    if (gest & C3_GEST_FLIP_ESTOP) {
+                        g.estop = true;
+                        g.mode = MODE_MANUAL;
+                        g.tgt_l = g.tgt_r = 0; g.cur_l = g.cur_r = 0;
+                        g.headlight = false; g.hazard = false;
+                        g.sig_l = g.sig_r = false;
+                        g.mist = false;
+                        roof_light_force_safe_off();
+                    }
+                    if (gest & C3_GEST_JERK_UP) {
+                        g.turbo = true;
+                        g.turbo_ms = now + 3000;
+                        g.mist = true;
+                    }
+                    if (gest & C3_GEST_DBL_SHAKE) {
+                        snd_play("horn_sound");
+                    }
+                    if (gest & C3_GEST_STILL_8S) {
+                        g.table_fire = true;
+                    }
+
+                    if (evt & C3_MIC_EVT_CLAP2) { g.headlight = !g.headlight; }
+                    if (evt & C3_MIC_EVT_CLAP3) {
+                        roof_light_set_enabled(true);
+                        roof_light_set_mode(ROOF_LIGHT_POLICE);
+                        snd_play("horn_sound");
+                    }
+                    if (evt & C3_MIC_EVT_CLAP4) { g.table_fire = !g.table_fire; }
+                    if (evt & C3_MIC_EVT_BLOW) {
+                        if (os_parked()) {
+                            /* flare handled by matrix engine via g.table_fire */
+                            g.table_fire = true;
+                        } else {
+                            g.mist = true;
+                        }
+                    }
+                    if (evt & C3_MIC_EVT_WHISTLE) {
+                        roof_light_set_enabled(true);
+                        roof_light_set_mode(ROOF_LIGHT_POLICE);
+                        snd_play("horn_sound");
+                    }
+                    if (evt & C3_MIC_EVT_VOICE) {
+                        switch (cs->last.voice_cmd) {
+                        case C3_VOICE_HEADLIGHT_ON:  g.headlight = true; break;
+                        case C3_VOICE_HEADLIGHT_OFF: g.headlight = false; break;
+                        case C3_VOICE_HORN:          snd_play("horn_sound"); break;
+                        case C3_VOICE_TURBO:         g.turbo = true; g.turbo_ms = now + 3000; break;
+                        case C3_VOICE_ESTOP:         g.estop = true; g.mode = MODE_MANUAL; break;
+                        case C3_VOICE_FIND_CAR:
+                            roof_light_set_enabled(true);
+                            roof_light_set_mode(ROOF_LIGHT_POLICE);
+                            snd_play("horn_sound");
+                            break;
+                        case C3_VOICE_MATRIX_FIRE:   g.table_fire = true; break;
+                        default: break;
+                        }
+                    }
+                }
+            }
+        }
         if (dt_ms > 100) dt_ms = 100;
         last_loop_ms = now;
         bool arcade_on = serpent_arcade_active() || neon_raid_active() || neon_breaker_active() || matrix_show_active() || runner_active();
@@ -3807,6 +4033,9 @@ void car_task(void *arg)
         if (neon_raid_active()) neon_raid_tick(now);
         if (neon_breaker_active()) neon_breaker_tick(now);
         if (runner_active()) runner_tick(now);
+        if (matrix_show_active() && !os_parked()) {
+            matrix_show_close(now);
+        }
         if (matrix_show_active()) matrix_show_tick(now);
 
         if (arcade_eats) {
@@ -3981,7 +4210,7 @@ void car_task(void *arg)
         /* B+ pacing: fixed 20 ms while arcade active (no relative delay),
            otherwise the legacy relative delay. */
         {
-            bool ae = serpent_arcade_active() || neon_raid_active() || neon_breaker_active() || matrix_show_active();
+            bool ae = serpent_arcade_active() || neon_raid_active() || neon_breaker_active() || matrix_show_active() || runner_active();
             if (ae) {
                 if (!s_arc_was) {
                     s_arc_wake = xTaskGetTickCount();
