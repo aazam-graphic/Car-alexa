@@ -326,35 +326,50 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
             gfx_rect(236,86,74,42,RGB565(245,210,140)); gfx_text_small(242,92,"TEMP",RGB565(30,32,40)); gfx_text_large(242,100,"28C",RGB565(30,32,40));
             gfx_rect(236,136,74,30,RGB565(240,240,240)); gfx_text_small(242,142,"RH 44%",RGB565(80,85,95));
         }
-        else if (design == 4) { /* CONCEPT 5 — LINEAR CAMERA RULER / TAPE OS */
-            gfx_clear(RGB565(245,246,248));
+        else if (design == 4) { /* CONCEPT 5 — RANGEFINDER / DASHBOARD (ref: dashboard_320x240) */
             struct tm tm; localtime_r(&t, &tm); int hh12 = tm.tm_hour%12; if(hh12==0) hh12=12;
-            /* Sliding ruler scale at top — no black title bar */
-            gfx_rect(10,36,300,58,RGB565(255,255,255)); gfx_rect_outline(10,36,300,58,RGB565(30,32,40));
-            /* Sliding ruler scale at top (tick marks centered on current second) */
-            gfx_rect(10,36,300,58,RGB565(255,255,255)); gfx_rect_outline(10,36,300,58,RGB565(30,32,40));
-            gfx_text_small(16,42,"RANGEFINDER LINEAR SEC TAPE",RGB565(100,105,115));
-            int cx=160; int cy=78;
-            for(int i=-12;i<=12;i++){
+            gfx_clear(RGB565(240,242,246));   /* #EEF2F6 soft cool-gray outer bg */
+
+            /* 1. TOP CARD: RANGEFINDER LINEAR SEC TAPE */
+            gfx_rect(8,8,304,72, RGB565(255,255,255)); gfx_rect_outline(8,8,304,72, RGB565(216,224,234));
+            gfx_text_small(14,14,"RANGEFINDER LINEAR SEC TAPE",RGB565(132,138,150));
+            /* Orange triangle needle + sec counter at right */
+            gfx_rect(242,12,6,6, RGB565(255,108,0)); gfx_text_small(254,12,"59 SEC",RGB565(255,108,0));
+            /* Linear tape: scale centered on current second */
+            int cx_tape = 160; int cy_tape = 58;
+            for(int i=-3;i<=22;i++){
                 int val=(tm.tm_sec+i+60)%60; bool major=(val%5==0); bool center=(i==0);
-                int x=cx+i*11; int h=(major?14:7); int y=cy-h/2;
-                gfx_rect(x,y,1,h,center?RGB565(40,115,210):(major?RGB565(30,32,40):RGB565(160,165,170)));
-                if(major){ char vt[4]; snprintf(vt,sizeof(vt),"%02d",val); gfx_text_small(x-6,y-10,vt,RGB565(30,32,40)); }
+                int x=cx_tape+i*11; int h=(major?14:6);
+                gfx_rect(x,cy_tape-h/2,1,h, center?RGB565(30,32,40):(major?RGB565(30,32,40):RGB565(176,182,192)));
+                if(major){ char lbl[4]; snprintf(lbl,sizeof(lbl),"%02d",val); gfx_text_small(x-6,cy_tape-24,lbl,RGB565(30,32,40)); }
             }
-            /* Center needle indicator (red line) at current second position */
-            int needle_x = cx - 1; gfx_rect(needle_x, 36, 3, 58, RGB565(200,50,40));
-            /* Split instrument readout */
-            gfx_rect(10,108,160,80,RGB565(255,255,255)); gfx_rect_outline(10,108,160,80,RGB565(30,32,40));
-            gfx_text_small(16,118,"CHRONOGRAPH",RGB565(100,105,115));
-            char hstr[4]; snprintf(hstr,sizeof(hstr),"%02d",hh12);
-            char mstr[4]; snprintf(mstr,sizeof(mstr),"%02d",tm.tm_min);
-            char hmin_buf[12]; snprintf(hmin_buf,sizeof(hmin_buf),"%s:%s",hstr,mstr); gfx_text_large(16,130,hmin_buf,RGB565(30,32,40));
-            gfx_rect(176,108,134,80,RGB565(30,32,40));
-            gfx_text_small(182,122,"MON 29 OCT  •  DELHI",RGB565(150,158,170));
-            gfx_text_small(182,138,"28C SUNNY  •  94% BAT",RGB565(240,240,240));
-            /* Bottom tactile instrument pill bar */
-            gfx_rect(10,196,300,22,RGB565(255,255,255)); gfx_rect_outline(10,196,300,22,RGB565(30,32,40));
-            gfx_text_small(16,202,"OUTDOOR 28C SUNNY  •  INDOOR 44%  •  ALARM 07:00  ACTIVE AM",RGB565(100,105,115));
+            /* Bold orange needle at current sec (center i==0) */
+            gfx_rect(cx_tape-1, 8, 3, 58, RGB565(255,108,0));
+
+            /* 2. MIDDLE-LEFT: CHRONOGRAPH */
+            gfx_rect(8,88,196,104, RGB565(255,255,255)); gfx_rect_outline(8,88,196,104, RGB565(216,224,234));
+            gfx_text_small(14,98,"CHRONOGRAPH",RGB565(132,138,150));
+            /* Peach pill AM/PM */
+            gfx_rect(254,94,28,16, RGB565(255,240,220)); gfx_text_small(258,98,"PM",RGB565(217,83,15));
+            /* Big clock: hour + orange colon dots + minute */
+            char hrStr[4]; snprintf(hrStr,sizeof(hrStr),"%02d",hh12);
+            char mnStr[4]; snprintf(mnStr,sizeof(mnStr),"%02d",tm.tm_min);
+            gfx_text_large(20,140,hrStr,RGB565(15,20,40));
+            /* Orange colon dots */
+            gfx_rect(92,148,4,4,RGB565(255,108,0)); gfx_rect(92,164,4,4,RGB565(255,108,0));
+            gfx_text_large(106,140,mnStr,RGB565(15,20,40));
+
+            /* 3. MIDDLE-RIGHT: ORANGE DATE CARD */
+            gfx_rect(212,88,100,104, RGB565(255,108,0));
+            gfx_text_small(226,98,"THU",RGB565(255,255,255));
+            gfx_text_large(226,120,"29",RGB565(255,255,255));
+            gfx_text_small(226,140,"OCT  •  28°C",RGB565(255,255,255));
+
+            /* 4. BOTTOM STATUS BAR */
+            gfx_rect(8,200,304,32, RGB565(255,255,255)); gfx_rect_outline(8,200,304,32, RGB565(216,224,234));
+            gfx_rect(20,214,8,8, RGB565(16,185,129)); /* green dot */
+            gfx_text_small(32,206,"DELHI  •  28°C  SUNNY",RGB565(15,20,40));
+            gfx_text_small(232,206,"RH 44%",RGB565(132,138,150));
         }
         else { /* Fallback placeholder for out-of-range design */
             gfx_text_medium(20, 14, "TABLE CLOCK", SB_INK);
