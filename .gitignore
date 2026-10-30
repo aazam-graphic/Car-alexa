@@ -33,3 +33,6 @@ function.zip
 nvs_*.bin
 nvs_*.csv
 *.bin
+build.old/
+build*/
+*.bak
