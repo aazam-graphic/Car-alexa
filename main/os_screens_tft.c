@@ -466,10 +466,28 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
             struct tm tm; localtime_r(&t, &tm); int hh12 = tm.tm_hour%12; if(hh12==0) hh12=12;
             /* Sky gradient based on hour */
             int h = tm.tm_hour;
-            uint16_t skyTop = (h>=6&&h<18)?RGB565(60,150,245):(h>=18&&h<21)?RGB565(42,24,78):RGB565(6,10,26);
-            uint16_t skyBot = (h>=6&&h<18)?RGB565(135,200,255):(h>=18&&h<21)?RGB565(245,155,55):RGB565(32,52,100);
-            for(int y=0; y<240; y++){ gfx_hline(0,y,320, (y<120)?skyTop:skyBot); }
-            /* Hero clock (large smooth digits) */
+            bool night = (h>=19 || h<6);
+            uint16_t b_night[8] = {0x0002,0x0004,0x0826,0x0848,0x086A,0x108C,0x10CE,0x1110};
+            uint16_t b_day[8]  = {0x1339,0x1B9B,0x241D,0x2C7E,0x3CFE,0x4D7F,0x5DFF,0x767F};
+            uint16_t* b = night ? b_night : b_day;
+            for(int i=0;i<8;i++) gfx_rect(0,i*30,320,30,b[i]);
+            /* Night artwork: stars + crescent moon */
+            if(night){
+                int sx[]={18,52,95,134,168,192,215,238,296,305,178,204,226,288,155,74,118,248};
+                int sy[]={12,18,10,16,24,14,38,18,22,58,72,95,64,92,54,14,22,98};
+                for(int s=0;s<18;s++) gfx_rect(sx[s],sy[s],(s%4==0)?2:1,(s%4==0)?2:1,(s%3==0)?RGB565(255,224,0):RGB565(255,255,255));
+                int mx=262,my=56,mr=22;
+                for(int dy=-mr; dy<=mr; dy++){ int dx=(int)sqrt(mr*mr-dy*dy); gfx_rect(mx-dx,my+dy,dx*2+1,1,RGB565(255,224,0)); }
+                int cx2=mx+9,cy2=my-5,cr=19;
+                for(int dy=-cr; dy<=cr; dy++){ int dx=(int)sqrt(cr*cr-dy*dy); int py=cy2+dy; uint16_t skyCol = (py>=0&&py<240)?b[py/30]:RGB565(240,245,250); gfx_rect(cx2-dx,py,dx*2+1,1,skyCol); }
+            }
+            else if(!night){
+                int sx2=258,sy2=58,sr2=24;
+                for(int dy=-sr2; dy<=sr2; dy++){ int dx2=(int)sqrt(sr2*sr2-dy*dy); gfx_rect(sx2-dx2,sy2+dy,dx2*2+1,1,RGB565(255,224,0)); }
+                gfx_rect(212,74,56,14,RGB565(255,255,255));
+                gfx_rect(220,66,40,10,RGB565(255,255,255));
+            }
+            /* Hero clock */
             int h1=(hh12/10)%10, h2=hh12%10, m1=(tm.tm_min/10)%10, m2=tm.tm_min%10;
             int cY=38, dW=28, dH=54, dT=7;
             drawSmoothDigit(12,cY,h1,dW,dH,dT,RGB565(255,255,255));
