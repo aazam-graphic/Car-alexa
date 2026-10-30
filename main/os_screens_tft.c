@@ -423,7 +423,7 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
             const char* wdays[] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
             gfx_text_small(226,98,wdays[tm.tm_wday],RGB565(255,255,255)); /* y=98 */
             /* Actual day number at y=118 */
-            int dayNumReal = tm.tm_mday > 0 ? tm.tm_mday : 30;  /* fallback 30 Oct */
+            int dayNumReal = 30;  /* 30 Oct (user request) */
             int d1r = (dayNumReal/10)%10; int d2r = dayNumReal%10;
             drawSmoothDigit(226, 118, d1r, 22, 36, 5, RGB565(255,255,255));
             drawSmoothDigit(250, 118, d2r, 22, 36, 5, RGB565(255,255,255));
