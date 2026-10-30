@@ -154,8 +154,8 @@ static void start_sntp(void)
         "162.159.200.1",    /* time.cloudflare.com */
     };
     if (s_sntp_try < 0) s_sntp_try = 0;
-    if (s_sntp_try > 3) s_sntp_try = 3;   /* safety; actual max used is 2 */
-    ESP_LOGI(TAG, "SNTP try %d: %s", s_sntp_try + 1, servers[s_sntp_try]);
+    if (s_sntp_try > 2) s_sntp_try = 2;   /* max reachable server index */
+    ESP_LOGI(TAG, "SNTP try %d: %s", s_sntp_try, servers[s_sntp_try]);
     esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG(servers[s_sntp_try]);
     cfg.sync_cb = time_sync_cb;
     esp_err_t e = esp_netif_sntp_init(&cfg);
@@ -280,17 +280,38 @@ bool net_wifi_up(void)                    { return s_state == NET_WIFI_UP; }
 bool net_wifi_time_synced(void)           { return s_time_ok; }
 time_t net_wifi_last_known(void)          { return s_last_known; }
 
+/* On-demand WiFi wake: resumes station + SNTP after auto-off (Alexa bridge
+   trigger). Idempotent, non-blocking. */
+esp_err_t net_wifi_reconnect(void)
+{
+    if (!s_started) return ESP_ERR_INVALID_STATE;
+    if (s_wifi_off) {
+        s_wifi_off = false;
+        s_state = NET_WIFI_CONNECTING;
+        ESP_LOGI(TAG, "WiFi wake-on-demand: restarting station...");
+        esp_wifi_start();
+    }
+    return ESP_OK;
+}
+
 void net_wifi_poll(uint32_t now_ms)
 {
     if (!s_started || s_wifi_off) return;
-    /* SNTP server fallback: har server ko 20 s dein, phir agla (DNS/UDP-123
-       blocked hone par). Pool pehle hi try ho chuka hai (boot ke waqt start_sntp()),
-       isliye ab Google → Cloudflare aur baad kuch nahi. */
-    if (!s_time_ok && s_sntp_up && s_sntp_try < 3 &&
-        (uint32_t)(now_ms - s_sntp_ms) >= 20000) {
-        esp_netif_sntp_deinit();
-        s_sntp_up = false;
-        start_sntp();
+    /* SNTP server fallback: fail hone par agla server try karo (DNS/UDP-123
+       blocked hone par). Pool pehle hi start_sntp() me chuka tha (index 0), isliye
+       fail par Google (1) → Cloudflare (2) chalti hai. */
+    if (!s_time_ok && s_sntp_up && (uint32_t)(now_ms - s_sntp_ms) >= 20000) {
+        if (s_sntp_try < 2) {
+            s_sntp_try++;
+            const char *name;
+            if (s_sntp_try == 1) name = "216.239.35.0";
+            else if (s_sntp_try == 2) name = "162.159.200.1";
+            else name = "pool.ntp.org";
+            ESP_LOGI(TAG, "SNTP fallback -> attempt %d: %s", s_sntp_try + 1, name);
+            esp_netif_sntp_deinit();
+            s_sntp_up = false;
+            start_sntp();
+        }
     }
     /* one-time: persist working creds to NVS (car_task context) */
     static bool s_cred_done = false;

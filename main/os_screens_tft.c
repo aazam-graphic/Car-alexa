@@ -17,7 +17,6 @@
 #include "imu_adv.h"  /* PART 10: score/trip windows */
 #include "ui_drive_cockpit.h"
 #include "mic_in.h"   /* PART 8: DIAG VU meter */
-#include "c3_receiver_s3.h"
 #include "img_bank.h" /* PART 6: boot logo + bg */
 #include "notif.h"    /* PART 10.3 Notification Center */
 #include "net_wifi.h" /* PART 10: connectivity window */
@@ -165,7 +164,7 @@ static void sb_str_upper(char *s)
         if (*s >= 'a' && *s <= 'z') *s = (char)(*s - 32);
 }
 
-static void os_scr_standby_0(os_ctx_t *ctx, uint32_t now)
+void os_scr_standby(os_ctx_t *ctx, uint32_t now)
 {
     /* LAG FIX Oct 2026: clock needs 4 FPS max (colon blink); skip rest. */
     {
@@ -192,70 +191,181 @@ static void os_scr_standby_0(os_ctx_t *ctx, uint32_t now)
     bool show = synced || t > 1700000000L;
     bool stale = !synced && show;
     if (show) {
-        struct tm tm;
-        localtime_r(&t, &tm);
-        char db[28];
-        strftime(db, sizeof(db), "%a, %d %b %Y", &tm);
-        sb_str_upper(db);
-        gfx_text_medium(20, 14, db, SB_INK);
-        if (stale)
-            gfx_text_small(250, 16, "OLD", SB_MUTED);   /* last-known, sync pending */
-        gfx_rect(20, 36, 200, 3, SB_TRACK);
-        int fill = 200 * tm.tm_sec / 60;
-        if (fill > 0) gfx_rect(20, 36, fill, 3, SB_GOLD);
-
-        /* giant HH:MM + smaller SS + AM/PM pill (12-hour) */
-        int hh = tm.tm_hour % 12;
-        if (hh == 0) hh = 12;
-        bool pm = tm.tm_hour >= 12;
-        int s = 10, slot = 4 * s;               /* digit 30x70 */
-        int x0 = 30, y0 = 56;
-        sb_digit(x0, y0, s, hh / 10, SB_INK);
-        sb_digit(x0 + slot, y0, s, hh % 10, SB_INK);
-        if (((now / 500) & 1) == 0) {           /* classic colon blink */
-            gfx_rect(x0 + 2 * slot + 4, y0 + 16, 9, 9, SB_INK);
-            gfx_rect(x0 + 2 * slot + 4, y0 + 45, 9, 9, SB_INK);
+        uint8_t design = ctx->sb_design;
+        /* Design 0: Table Clock (current - cream card, 7-segment, classic) */
+        if (design == 0) { /* CONCEPT 1 — SOLAR HORIZON ARC */
+            gfx_clear(RGB565(248, 250, 252));
+            struct tm tm; localtime_r(&t, &tm); bool pm = tm.tm_hour >= 12;
+            int hh = tm.tm_hour % 12; if (hh==0) hh=12;
+            char db[28]; strftime(db,sizeof(db),"%a  %d %b %Y",&tm); sb_str_upper(db);
+            gfx_rect(10, 8, 300, 22, RGB565(30,32,38)); gfx_text_small(16, 14, db, RGB565(240,240,245));
+            gfx_text_small(260, 14, "SOLAR ARC  •  HORIZON", RGB565(150,158,170));
+            /* Premium Solar Arc — larger sun arc + deep glass time card */
+            gfx_text_small(40, 56, "SOLAR ARC  •  HORIZON", RGB565(150,158,170));
+            int sun_cx = 160; int sun_cy = 85;
+            gfx_rect(sun_cx-22, sun_cy-22, 44, 44, RGB565(255,245,235)); gfx_rect_outline(sun_cx-22,sun_cy-22,44,44,RGB565(220,210,195));
+            gfx_rect(sun_cx-10, sun_cy-10, 20, 20, RGB565(245,180,30)); gfx_rect_outline(sun_cx-10,sun_cy-10,20,20,RGB565(255,240,220));
+            gfx_rect(30, 128, 260, 52, RGB565(30,32,40)); gfx_rect_outline(30,128,260,52,RGB565(40,45,55));
+            char time_main[16]; snprintf(time_main,sizeof(time_main),"%02d:%02d", hh, tm.tm_min);
+            gfx_text_large(50, 140, time_main, RGB565(245,245,235));
+            char pm_str[8]; snprintf(pm_str,sizeof(pm_str),"%s", pm?"PM":"AM"); gfx_text_large(235, 150, pm_str, RGB565(240,240,240));
+            gfx_text_small(16, 158, pm?"EVENING":"MORNING", RGB565(180,190,200));
+            gfx_rect(10, 184, 300, 30, RGB565(245,240,230)); gfx_rect_outline(10,184,300,30,RGB565(200,190,170));
+            gfx_text_small(20, 194, "RISE 06:31  •  DELHI 28C SUNNY  •  SET 17:38", RGB565(80,85,95));
         }
-        sb_digit(x0 + 2 * slot + 22, y0, s, tm.tm_min / 10, SB_INK);
-        sb_digit(x0 + 3 * slot + 22, y0, s, tm.tm_min % 10, SB_INK);
-        /* seconds, smaller, top-right of the big digits */
-        int sx = x0 + 4 * slot + 34, ss = 5;
-        sb_digit(sx, y0 + 2, ss, tm.tm_sec / 10, SB_MUTED);
-        sb_digit(sx + 4 * ss + 4, y0 + 2, ss, tm.tm_sec % 10, SB_MUTED);
-        /* AM/PM pill under seconds */
-        gfx_rect(sx - 2, y0 + 44, 52, 20, SB_PILL);
-        gfx_text_small(sx + 8, y0 + 49, pm ? "PM" : "AM", SB_INK);
-
-        /* weekday (letterspaced) + gold divider + numeric date */
-        char wd[16];
-        strftime(wd, sizeof(wd), "%A", &tm);
-        sb_str_upper(wd);
-        char spaced[32];
-        {
-            int p = 0;
-            for (int i = 0; wd[i] && p < (int)sizeof(spaced) - 3; i++) {
-                spaced[p++] = wd[i];
-                if (wd[i + 1]) spaced[p++] = ' ';
+        else if (design == 1) { /* CONCEPT 2 — WORD MATRIX + ROLLING DRUM */
+            gfx_clear(RGB565(248, 250, 252));
+            struct tm tm; localtime_r(&t, &tm); int hh12 = tm.tm_hour % 12; if (hh12==0) hh12=12;
+            char db[28]; strftime(db,sizeof(db),"%a  %d %b",&tm); sb_str_upper(db);
+            gfx_rect(10,8,300,22,RGB565(30,32,38)); gfx_text_small(16,13,db,RGB565(240,240,245));
+            gfx_text_small(260,13,"WORD + TAPE",RGB565(150,158,170));
+            /* Left word matrix */
+            gfx_rect(10,36,185,160,RGB565(255,255,255)); gfx_rect_outline(10,36,185,160,RGB565(220,223,230));
+            gfx_text_small(16,42,"WORD MATRIX",RGB565(100,105,115));
+            const char *wrows[7][4]={{"IT","IS","HALF","10"},{"QUARTER","20","5","1"},
+                {"PAST","TO","FOUR","FIVE"},{"SIX","SEVEN","EIGHT","NINE"},
+                {"TEN","ELEVEN","TWELVE","O'CLOCK"},{"ONE","TWO","THREE","FOUR"},
+                {"FIVE","SIX","SEVEN","EIGHT"}};
+            int y0=58; int rh=14;
+            for(int r=0;r<7;r++){
+                for(int c=0;c<4;c++){
+                    int cx=16+c*46, cy=y0+r*rh;
+                    bool on = (r==0 && (c==0||c==1)) || (r==3 && (c==2||c==3)) || (r==4 && (c==0||c==1));
+                    if(r==3 && c==0 && tm.tm_min>=25 && tm.tm_min<30) on=true;
+                    gfx_rect(cx,cy,40,10,on?RGB565(30,32,38):RGB565(230,232,238));
+                    gfx_text_small(cx+3,cy+2,wrows[r][c],on?RGB565(255,255,255):RGB565(160,165,170));
+                }
             }
-            spaced[p] = 0;
+            /* Right vertical drum tape */
+            gfx_rect(205,36,105,160,RGB565(255,255,255)); gfx_rect_outline(205,36,105,160,RGB565(220,223,230));
+            gfx_text_small(212,42,"DRUM TAPE",RGB565(100,105,115));
+            /* Prev / active / next rows */
+            char hstr[4]; snprintf(hstr,sizeof(hstr),"%02d",hh12);
+            gfx_rect(212,60,50,28,RGB565(230,232,238)); gfx_text_large(216,64,hstr,RGB565(30,32,40));
+            gfx_rect(268,60,55,28,RGB565(30,32,38)); gfx_text_large(272,64,hstr,RGB565(255,255,255));
+            gfx_rect(212,94,50,28,RGB565(230,232,238)); gfx_text_large(216,98,hstr,RGB565(30,32,40));
+            /* Minutes */
+            char mstr[4]; snprintf(mstr,sizeof(mstr),"%02d",tm.tm_min);
+            char mprev[4]; snprintf(mprev,sizeof(mprev),"%02d",(tm.tm_min+59)%60);
+            char mnext[4]; snprintf(mnext,sizeof(mnext),"%02d",(tm.tm_min+1)%60);
+            gfx_rect(212,118,50,28,RGB565(230,232,238)); gfx_text_large(216,122,mprev,RGB565(30,32,40));
+            gfx_rect(268,118,55,28,RGB565(220,50,40)); gfx_text_large(272,122,mstr,RGB565(255,255,255));
+            gfx_rect(212,150,50,28,RGB565(230,232,238)); gfx_text_large(216,154,mnext,RGB565(30,32,40));
+            /* Seconds tape bottom */
+            gfx_rect(205,168,105,28,RGB565(220,50,40));
+            char sstr[4]; snprintf(sstr,sizeof(sstr),"%02d",tm.tm_sec);
+            gfx_text_small(212,174,"SEC ROLL",RGB565(240,220,220));
+            gfx_text_large(260,174,sstr,RGB565(255,255,255));
         }
-        gfx_text_center_box(0, 146, 320, spaced, UI_FONT_SMALL, SB_MUTED);
-        gfx_hline(70, 168, 90, SB_GOLD);
-        gfx_hline(160, 168, 90, SB_GOLD);
-        gfx_rect(157, 165, 6, 6, SB_GOLD);
-        char nd[20];
-        strftime(nd, sizeof(nd), "%d / %m / %Y", &tm);
-        gfx_text_center_box(0, 180, 320, nd, UI_FONT_SMALL, SB_MUTED);
-    } else {
-        /* not synced: honest placeholders, zero faked digits */
-        gfx_text_medium(20, 14, "TABLE CLOCK", SB_INK);
-        gfx_rect(20, 36, 200, 3, SB_TRACK);
-        gfx_text_center_box(0, 70, 320, "-- : --", UI_FONT_LARGE, SB_MUTED);
-        gfx_text_center_box(0, 146, 320, "- - - - - - -", UI_FONT_SMALL, SB_MUTED);
-        gfx_hline(70, 168, 90, SB_GOLD);
-        gfx_hline(160, 168, 90, SB_GOLD);
-        gfx_rect(157, 165, 6, 6, SB_GOLD);
-        gfx_text_center_box(0, 180, 320, "-- / -- / ----", UI_FONT_SMALL, SB_MUTED);
+        else if (design == 2) { /* CONCEPT 3 — ORBITAL RINGS (3 concentric dials) */
+            gfx_clear(RGB565(245,247,250));
+            struct tm tm; localtime_r(&t, &tm); int hh12 = tm.tm_hour%12; if(hh12==0) hh12=12;
+            gfx_rect(10,8,300,22,RGB565(30,32,40)); gfx_text_small(16,13,"ORBITAL RINGS  •  3 DIALS",RGB565(240,240,245));
+            gfx_text_small(260,13,"CONCEPT 03",RGB565(150,158,170));
+            int cx=160, cy=120;
+            /* 3 orbital circles — bold visible rings */
+            gfx_rect_outline(cx-102,cy-102,204,204,RGB565(30,32,40));
+            gfx_rect_outline(cx-76,cy-76,152,152,RGB565(40,115,210));
+            gfx_rect_outline(cx-48,cy-48,96,96,RGB565(30,32,40));
+            gfx_rect(cx-40,cy-40,80,80,RGB565(245,247,250));
+            /* Inner hour pill */
+            int hx=(int)(cx-14+30*cos(((hh12*30+tm.tm_min*0.5-90)*M_PI)/180));
+            int hy=(int)(cy-14+30*sin(((hh12*30+tm.tm_min*0.5-90)*M_PI)/180));
+            gfx_rect(hx-12,hy-12,24,24,RGB565(30,32,40));
+            char hstr[4]; snprintf(hstr,sizeof(hstr),"%02d",hh12); gfx_text_small(hx-6,hy+2,hstr,RGB565(255,255,255));
+            /* Middle minute pill */
+            int mx=(int)(cx-14+50*cos(((tm.tm_min*6-90)*M_PI)/180));
+            int my=(int)(cy-14+50*sin(((tm.tm_min*6-90)*M_PI)/180));
+            gfx_rect(mx-12,my-12,24,24,RGB565(40,115,210));
+            char mstr[4]; snprintf(mstr,sizeof(mstr),"%02d",tm.tm_min); gfx_text_small(mx-6,my+2,mstr,RGB565(255,255,255));
+            /* Outer second pill */
+            int sx=(int)(cx-14+74*cos(((tm.tm_sec*6-90)*M_PI)/180));
+            int syy=(int)(cy-14+74*sin(((tm.tm_sec*6-90)*M_PI)/180));
+            gfx_rect(sx-10,syy-10,20,20,RGB565(255,255,255));
+            gfx_rect_outline(sx-10,syy-10,20,20,RGB565(40,115,210));
+            char sstr[4]; snprintf(sstr,sizeof(sstr),"%02d",tm.tm_sec); gfx_text_small(sx-5,syy+2,sstr,RGB565(30,32,40));
+            char sdate[28]; strftime(sdate,sizeof(sdate),"%a %d %b",&tm); sb_str_upper(sdate);
+            /* Corner badges (DATE / DELHI / DIGITAL / CYCLE) per HTML spec */
+            gfx_rect(10,6,70,20,RGB565(255,255,255)); gfx_rect_outline(10,6,70,20,RGB565(220,223,230));
+            gfx_text_small(14,11,"DATE",RGB565(30,32,40)); gfx_text_small(14,18,sdate,RGB565(100,105,115));
+            gfx_rect(240,6,70,20,RGB565(255,255,255)); gfx_rect_outline(240,6,70,20,RGB565(220,223,230));
+            gfx_text_small(244,11,"DELHI",RGB565(100,105,115)); gfx_text_small(244,18,"28C SUNNY",RGB565(30,32,40));
+            /* Center hub with ORBITAL label + time */
+            gfx_rect(cx-36,cy-18,72,36,RGB565(255,255,255)); gfx_rect_outline(cx-36,cy-18,72,36,RGB565(30,32,40));
+            gfx_text_small(cx-20,cy-8,"ORBITAL",RGB565(30,32,40));
+            char hub_time[12]; snprintf(hub_time,sizeof(hub_time),"%02d:%02d",hh12,tm.tm_min); gfx_text_small(cx-14,cy+4,hub_time,RGB565(30,32,40));
+            /* Spoke lines from center to pills */
+            gfx_rect(cx, cy, 2, 2, RGB565(200,205,215));
+            gfx_line(cx, cy, hx, hy, RGB565(30,32,40));
+            gfx_line(cx, cy, mx, my, RGB565(40,115,210));
+            gfx_line(cx, cy, sx, syy, RGB565(200,205,215));
+            gfx_rect(10,210,300,22,RGB565(255,255,255)); gfx_rect_outline(10,210,300,22,RGB565(220,223,230));
+            gfx_text_small(16,214,sdate,RGB565(30,32,40)); gfx_text_small(165,214,"DELHI 28C SUNNY 94% BAT",RGB565(100,105,115));
+        }
+        else if (design == 3) { /* CONCEPT 4 — BAUHAUS LIQUID FILL GRID */
+            gfx_clear(RGB565(254, 252, 245));
+            struct tm tm; localtime_r(&t, &tm); int hh12 = tm.tm_hour%12; if(hh12==0) hh12=12;
+            gfx_rect(10,8,300,22,RGB565(30,32,40)); gfx_text_small(16,13,"BAUHAUS LIQUID  •  RISING FILL",RGB565(240,240,245));
+            gfx_text_small(260,13,"CONCEPT 04",RGB565(150,158,170));
+            /* Asymmetric grid: big hour left, liquid minute center, telemetry right */
+            gfx_rect(10,36,110,130,RGB565(250,250,248)); gfx_rect_outline(10,36,110,130,RGB565(30,32,40));
+            gfx_text_small(16,42,"HR",RGB565(100,105,115));
+            char hstr[4]; snprintf(hstr,sizeof(hstr),"%02d",hh12); gfx_text_large(20,60,hstr,RGB565(30,32,40));
+            gfx_rect(10,150,110,36,RGB565(245,240,245)); gfx_text_small(16,156,"MON 29 OCT",RGB565(100,105,115));
+            /* Center liquid minute column with rising fill by seconds */
+            int fill = (tm.tm_sec * 100) / 59;
+            const int LCX = 122; const int LCW = 102;
+            gfx_rect(LCX,36,110,130,RGB565(255,255,255)); gfx_rect_outline(LCX,36,110,130,RGB565(30,32,40));
+            int fill_top = 36 + 130 - (130*fill/100);
+            gfx_rect(LCX,fill_top,110,(130*fill/100),RGB565(40,115,210));
+            gfx_rect(LCX+55,36,2,130,RGB565(120,130,145));
+            char min_col[4]; snprintf(min_col,sizeof(min_col),"%02d",tm.tm_min); gfx_text_large(LCX+5,78,min_col,RGB565(30,32,40));
+            char fill_str[16]; snprintf(fill_str,sizeof(fill_str),"FILL %d%%",fill); gfx_text_small(LCX+5,122,fill_str,RGB565(30,32,40));
+            /* Right stacked telemetry blocks */
+            gfx_rect(236,36,74,42,RGB565(30,32,40)); gfx_text_small(242,42,"SEC",RGB565(150,158,170)); char sstr_buf[4]; snprintf(sstr_buf,sizeof(sstr_buf),"%02d",tm.tm_sec); gfx_text_large(242,50,sstr_buf,RGB565(255,255,255));
+            gfx_rect(236,86,74,42,RGB565(245,210,140)); gfx_text_small(242,92,"TEMP",RGB565(30,32,40)); gfx_text_large(242,100,"28C",RGB565(30,32,40));
+            gfx_rect(236,136,74,30,RGB565(240,240,240)); gfx_text_small(242,142,"RH 44%",RGB565(80,85,95));
+        }
+        else if (design == 4) { /* CONCEPT 5 — LINEAR CAMERA RULER / TAPE OS */
+            gfx_clear(RGB565(245,246,248));
+            struct tm tm; localtime_r(&t, &tm); int hh12 = tm.tm_hour%12; if(hh12==0) hh12=12;
+            /* Sliding ruler scale at top — no black title bar */
+            gfx_rect(10,36,300,58,RGB565(255,255,255)); gfx_rect_outline(10,36,300,58,RGB565(30,32,40));
+            /* Sliding ruler scale at top (tick marks centered on current second) */
+            gfx_rect(10,36,300,58,RGB565(255,255,255)); gfx_rect_outline(10,36,300,58,RGB565(30,32,40));
+            gfx_text_small(16,42,"RANGEFINDER LINEAR SEC TAPE",RGB565(100,105,115));
+            int cx=160; int cy=78;
+            for(int i=-12;i<=12;i++){
+                int val=(tm.tm_sec+i+60)%60; bool major=(val%5==0); bool center=(i==0);
+                int x=cx+i*11; int h=(major?14:7); int y=cy-h/2;
+                gfx_rect(x,y,1,h,center?RGB565(40,115,210):(major?RGB565(30,32,40):RGB565(160,165,170)));
+                if(major){ char vt[4]; snprintf(vt,sizeof(vt),"%02d",val); gfx_text_small(x-6,y-10,vt,RGB565(30,32,40)); }
+            }
+            /* Center needle indicator (red line) at current second position */
+            int needle_x = cx - 1; gfx_rect(needle_x, 36, 3, 58, RGB565(200,50,40));
+            /* Split instrument readout */
+            gfx_rect(10,108,160,80,RGB565(255,255,255)); gfx_rect_outline(10,108,160,80,RGB565(30,32,40));
+            gfx_text_small(16,118,"CHRONOGRAPH",RGB565(100,105,115));
+            char hstr[4]; snprintf(hstr,sizeof(hstr),"%02d",hh12);
+            char mstr[4]; snprintf(mstr,sizeof(mstr),"%02d",tm.tm_min);
+            char hmin_buf[12]; snprintf(hmin_buf,sizeof(hmin_buf),"%s:%s",hstr,mstr); gfx_text_large(16,130,hmin_buf,RGB565(30,32,40));
+            gfx_rect(176,108,134,80,RGB565(30,32,40));
+            gfx_text_small(182,122,"MON 29 OCT  •  DELHI",RGB565(150,158,170));
+            gfx_text_small(182,138,"28C SUNNY  •  94% BAT",RGB565(240,240,240));
+            /* Bottom tactile instrument pill bar */
+            gfx_rect(10,196,300,22,RGB565(255,255,255)); gfx_rect_outline(10,196,300,22,RGB565(30,32,40));
+            gfx_text_small(16,202,"OUTDOOR 28C SUNNY  •  INDOOR 44%  •  ALARM 07:00  ACTIVE AM",RGB565(100,105,115));
+        }
+        else { /* Fallback placeholder for out-of-range design */
+            gfx_text_medium(20, 14, "TABLE CLOCK", SB_INK);
+            gfx_rect(20, 36, 200, 3, SB_TRACK);
+            gfx_text_center_box(0, 70, 320, "-- : --", UI_FONT_LARGE, SB_MUTED);
+            gfx_text_center_box(0, 146, 320, "- - - - - - -", UI_FONT_SMALL, SB_MUTED);
+            gfx_hline(70, 168, 90, SB_GOLD);
+            gfx_hline(160, 168, 90, SB_GOLD);
+            gfx_rect(157, 165, 6, 6, SB_GOLD);
+            gfx_text_center_box(0, 180, 320, "-- / -- / ----", UI_FONT_SMALL, SB_MUTED);
+        }
     }
 
     /* subtle centered PRESS START */
@@ -299,8 +409,8 @@ static void mark_chrome(const os_ctx_t *ctx)
 static const char *s_home_labels_p0[9] = {
     "DRIVE", "SNAKE", "SETTINGS", "GAMES", "DIAG", "RADAR", "ROOF", "TRIP", "NOTIFY"
 };
-static const char *s_home_labels_p1[5] = {
-    "GRAPHS", "SCORE", "LINK", "CLOCK", "MATRIX"
+static const char *s_home_labels_p1[9] = {
+    "GRAPHS", "SCORE", "LINK", "CLOCK", "MATRIX", "", "", "", ""
 };
 static const ui_icon_t s_home_icons_p0[9] = {
     UI_ICON_DRIVE, UI_ICON_SCREEN, UI_ICON_GEAR,
@@ -1063,15 +1173,6 @@ void os_scr_diag(const os_ctx_t *ctx, uint32_t now)
         size_t mi = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
         uint32_t up = (uint32_t)(esp_timer_get_time() / 1000000ULL);
         snprintf(buf, sizeof(buf), "UPTIME          %um %02us", (unsigned)(up / 60), (unsigned)(up % 60));
-        gfx_text_medium(x, y, buf, UI_TEXT); y += 24;
-        /* C3 link status */
-        const c3_link_state_t *_cs = c3_link_state();
-        snprintf(buf, sizeof(buf), "C3 LINK         %s  RSSI %u",
-                 g.c3_connected ? "OK" : "OFF", (unsigned)(_cs ? _cs->rssi : 0));
-        gfx_text_medium(x, y, buf, g.c3_connected ? UI_OK : UI_DANGER); y += 24;
-        snprintf(buf, sizeof(buf), "C3 PKTS RX      %lu  LOST %lu",
-                 (unsigned long)(c3_link_state() ? c3_link_state()->packets_rx : 0),
-                 (unsigned long)(c3_link_state() ? c3_link_state()->packets_lost : 0));
         gfx_text_medium(x, y, buf, UI_TEXT); y += 24;
         /* perf counters (guide 9) */
         const os_perf_t *pf = os_perf();
@@ -1974,124 +2075,4 @@ void os_scr_matrix_show(const os_ctx_t *ctx, uint32_t now)
     }
     ui_draw_bottombar("LEFT/RIGHT: FX  A/START: AUTO  X: RANDOM  B: HOME", "MATRIX SHOW");
     ui_mark_dirty_full();
-}
-/* v12 stub app screens */
-void os_scr_light_studio(os_ctx_t *ctx, uint32_t now) { (void)ctx;(void)now; gfx_clear(UI_BG); gfx_text_center_box(0,110,320,"LIGHT STUDIO",UI_FONT_LARGE,UI_ACCENT); ui_draw_bottombar("B HOME","LIGHT"); }
-void os_scr_megaphone(os_ctx_t *ctx, uint32_t now) { (void)ctx;(void)now; gfx_clear(UI_BG); gfx_text_center_box(0,110,320,"MEGAPHONE & VOICE",UI_FONT_LARGE,UI_ACCENT); ui_draw_bottombar("B HOME","MEGAPHONE"); }
-void os_scr_gyro_lab(os_ctx_t *ctx, uint32_t now) { (void)ctx;(void)now; gfx_clear(UI_BG); gfx_text_center_box(0,110,320,"GYRO MOTION LAB",UI_FONT_LARGE,UI_ACCENT); ui_draw_bottombar("B HOME","GYRO"); }
-void os_scr_autopilot(os_ctx_t *ctx, uint32_t now) { (void)ctx;(void)now; gfx_clear(UI_BG); gfx_text_center_box(0,110,320,"AI AUTOPILOT",UI_FONT_LARGE,UI_ACCENT); ui_draw_bottombar("B HOME","AUTOPILOT"); }
-void os_scr_mist_turbo(os_ctx_t *ctx, uint32_t now) { (void)ctx;(void)now; gfx_clear(UI_BG); gfx_text_center_box(0,110,320,"MIST & TURBO",UI_FONT_LARGE,UI_ACCENT); ui_draw_bottombar("B HOME","MIST"); }
-void os_scr_ghost_dvr(os_ctx_t *ctx, uint32_t now) { (void)ctx;(void)now; gfx_clear(UI_BG); gfx_text_center_box(0,110,320,"GHOST DVR",UI_FONT_LARGE,UI_ACCENT); ui_draw_bottombar("B HOME","DVR"); }
-/* v12: standby clock styles 1 & 2 */
-static void sb_time_now(bool *synced, time_t *t, bool *stale)
-{
-    *synced = net_wifi_time_synced();
-    *t = *synced ? time(NULL) : net_wifi_last_known();
-    *stale = !(*synced) && (*t > 1700000000L);
-}
-
-static void os_scr_standby_1(os_ctx_t *ctx, uint32_t now)
-{
-    (void)ctx;
-    gfx_clear(RGB565(12,14,20));
-    bool synced; time_t t; bool stale;
-    sb_time_now(&synced, &t, &stale);
-    if (!synced && t <= 1700000000L) { gfx_text_center_box(0,110,320,"--:--",UI_FONT_LARGE,UI_MUTED); return; }
-    struct tm tm; localtime_r(&t,&tm);
-    int cx=160,cy=90,r=70;
-    for(int i=0;i<60;i++){ float a=(i/60.0f)*6.28318f-1.5708f; int x=cx+(int)(cosf(a)*r); int y=cy+(int)(sinf(a)*r); uint16_t col=(i<tm.tm_sec)?RGB565(255,85,0):RGB565(60,60,70); gfx_rect(x,y,4,4,col); }
-    char buf[16]; snprintf(buf,sizeof(buf),"%02d:%02d:%02d",tm.tm_hour,tm.tm_min,tm.tm_sec);
-    gfx_text_center_box(0,78,320,buf,UI_FONT_LARGE,RGB565(255,255,255));
-    char d1[12],d2[12],d3[12]; snprintf(d1,sizeof(d1),"HR %02d",tm.tm_hour); snprintf(d2,sizeof(d2),"MN %02d",tm.tm_min); snprintf(d3,sizeof(d3),"SC %02d",tm.tm_sec);
-    gfx_text_center_box(0,170,320,d1,UI_FONT_SMALL,RGB565(255,85,0));
-    gfx_text_center_box(0,188,320,d2,UI_FONT_SMALL,RGB565(2,132,199));
-    gfx_text_center_box(0,206,320,d3,UI_FONT_SMALL,RGB565(16,185,129));
-    if(stale) gfx_text_small(290,10,"OLD",UI_MUTED);
-}
-
-static void os_scr_standby_2(os_ctx_t *ctx, uint32_t now)
-{
-    (void)ctx;(void)now;
-    gfx_clear(RGB565(20,22,28));
-    bool synced; time_t t; bool stale;
-    sb_time_now(&synced,&t,&stale);
-    if(!synced && t<=1700000000L){ gfx_text_center_box(0,110,320,"--:--",UI_FONT_LARGE,UI_MUTED); return; }
-    struct tm tm; localtime_r(&t,&tm);
-    int hh=tm.tm_hour%12; if(hh==0) hh=12;
-    char buf[8]; snprintf(buf,sizeof(buf),"%02d",hh);
-    int cw=120,ch=140,gap=16,x0=(320-2*cw-gap)/2,y0=40;
-    for(int c=0;c<2;c++){ int x=x0+c*(cw+gap); gfx_rect(x,y0,cw,ch,RGB565(40,42,50)); gfx_rect_outline(x,y0,cw,ch,RGB565(90,92,100)); gfx_hline(x,y0+ch/2,cw,RGB565(10,12,18)); char chh[2]={buf[c],0}; gfx_text_center_box(x,y0+30,cw,chh,UI_FONT_LARGE,RGB565(240,240,245)); }
-    gfx_rect(156,95,8,8,RGB565(240,240,245)); gfx_rect(156,125,8,8,RGB565(240,240,245));
-    char mb[8]; snprintf(mb,sizeof(mb),"%02d",tm.tm_min);
-    int mx=x0,my=y0+ch+16;
-    gfx_rect(mx,my,cw,ch/2,RGB565(40,42,50)); gfx_rect_outline(mx,my,cw,ch/2,RGB565(90,92,100)); gfx_hline(mx,my+ch/4,cw,RGB565(10,12,18));
-    gfx_text_center_box(mx,my+8,cw,mb,UI_FONT_LARGE,RGB565(240,240,245));
-    if(stale) gfx_text_small(290,10,"OLD",UI_MUTED);
-}
-static void os_scr_standby_3(os_ctx_t *ctx, uint32_t now)
-{
-    (void)ctx;(void)now;
-    gfx_clear(RGB565(245,242,235));
-    bool synced; time_t t; bool stale;
-    sb_time_now(&synced,&t,&stale);
-    if(!synced && t<=1700000000L){ gfx_text_center_box(0,110,320,"--:--",UI_FONT_LARGE,RGB565(20,20,20)); return; }
-    struct tm tm; localtime_r(&t,&tm);
-    gfx_rect(8,8,150,110,RGB565(255,85,0));
-    char hb[8]; snprintf(hb,sizeof(hb),"%02d",tm.tm_hour);
-    gfx_text_center_box(8,30,150,hb,UI_FONT_LARGE,RGB565(255,255,255));
-    gfx_rect(8,126,150,106,RGB565(20,20,20));
-    char mb[8]; snprintf(mb,sizeof(mb),"%02d",tm.tm_min);
-    gfx_text_center_box(8,150,150,mb,UI_FONT_LARGE,RGB565(255,255,255));
-    gfx_rect(166,8,146,50,RGB565(255,255,255)); gfx_rect_outline(166,8,146,50,RGB565(200,200,200));
-    gfx_text_small(174,16,"SEC",RGB565(120,120,120));
-    char sb[8]; snprintf(sb,sizeof(sb),"%02d",tm.tm_sec);
-    gfx_text_center_box(166,28,146,sb,UI_FONT_MEDIUM,RGB565(20,20,20));
-    gfx_rect(166,66,146,50,RGB565(255,255,255)); gfx_rect_outline(166,66,146,50,RGB565(200,200,200));
-    gfx_text_small(174,74,"DATE",RGB565(120,120,120));
-    char db[16]; snprintf(db,sizeof(db),"%02d/%02d",tm.tm_mday,tm.tm_mon+1);
-    gfx_text_center_box(166,90,146,db,UI_FONT_MEDIUM,RGB565(20,20,20));
-    gfx_rect(166,124,146,108,RGB565(20,20,20));
-    gfx_text_small(174,132,"STATUS",RGB565(120,120,120));
-    gfx_text_small(174,150,g.c3_connected?"C3 LINK OK":"C3 OFFLINE",g.c3_connected?RGB565(16,185,129):RGB565(239,68,68));
-    gfx_text_small(174,170,g.table_fire?"MATRIX FIRE":"MATRIX IDLE",RGB565(245,158,11));
-    if(stale) gfx_text_small(290,10,"OLD",RGB565(120,120,120));
-}
-
-static void os_scr_standby_4(os_ctx_t *ctx, uint32_t now)
-{
-    (void)ctx;
-    gfx_clear(RGB565(18,22,36));
-    bool synced; time_t t; bool stale;
-    sb_time_now(&synced,&t,&stale);
-    if(!synced && t<=1700000000L){ gfx_text_center_box(0,110,320,"--:--",UI_FONT_LARGE,UI_MUTED); return; }
-    struct tm tm; localtime_r(&t,&tm);
-    int sx=20+(tm.tm_hour*300/23);
-    int sy=60-(int)(sinf(tm.tm_hour/23.0f*3.14159f)*40);
-    gfx_rect(20,100,280,4,RGB565(60,70,90));
-    gfx_rect(sx-6,sy-6,12,12,RGB565(255,200,60));
-    char buf[16]; snprintf(buf,sizeof(buf),"%02d:%02d",tm.tm_hour,tm.tm_min);
-    gfx_text_center_box(0,110,320,buf,UI_FONT_LARGE,RGB565(240,240,250));
-    int cx=160,cy=170;
-    gfx_rect(cx-40,cy-10,80,20,RGB565(40,44,56));
-    if(g.headlight){ gfx_rect(cx-44,cy-8,6,4,RGB565(255,255,255)); gfx_rect(cx+38,cy-8,6,4,RGB565(255,255,255)); }
-    else { gfx_rect(cx-44,cy-8,6,4,RGB565(130,150,180)); gfx_rect(cx+38,cy-8,6,4,RGB565(130,150,180)); }
-    if(roof_light_state()->enabled) gfx_rect(cx-6,cy-14,12,3,RGB565(255,0,0));
-    if(g.led_mode==1) gfx_rect(cx-30,cy+12,60,2,RGB565(g_static_r,g_static_g,g_static_b));
-    if(g.braking) gfx_rect(cx-8,cy+8,16,3,RGB565(255,0,0));
-    if(stale) gfx_text_small(290,10,"OLD",UI_MUTED);
-    gfx_rect_outline(106,204,108,20,RGB565(120,120,140));
-    gfx_text_small(117,210,"PRESS START",RGB565(240,240,250));
-}
-
-void os_scr_standby(os_ctx_t *ctx, uint32_t now)
-{
-    uint8_t style = g.clk_style;
-    if (style > 4) style = 0;
-    switch (style) {
-        case 1: os_scr_standby_1(ctx, now); break;
-        case 2: os_scr_standby_2(ctx, now); break;
-        case 3: os_scr_standby_3(ctx, now); break;
-        case 4: os_scr_standby_4(ctx, now); break;
-        default: os_scr_standby_0(ctx, now); break;
-    }
 }

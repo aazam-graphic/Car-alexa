@@ -36,6 +36,8 @@ bool             net_wifi_time_synced(void);
 /* Last known epoch (NVS, saved every 60 s): instant clock at boot before
    SNTP locks. 0 = never synced yet. */
 time_t           net_wifi_last_known(void);
+/* Wake WiFi after auto-off (Alexa bridge / on-demand). Non-blocking. */
+esp_err_t        net_wifi_reconnect(void);
 /* Call every car_task loop: periodic epoch save + WiFi auto-off 5 s after
    sync (or 90 s give-up). Zero work otherwise. */
 void             net_wifi_poll(uint32_t now_ms);

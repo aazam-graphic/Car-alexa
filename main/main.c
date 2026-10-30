@@ -24,7 +24,6 @@
 #include "usb/usb_host.h"
 #include "xbox360.h"
 #include "car.h"
-#include "c3_receiver_s3.h"
 
 static const char *TAG = "usb_host";
 
@@ -82,14 +81,5 @@ void app_main(void)
                                        2,
                                        NULL,
                                        1);
-    assert(created == pdTRUE);
-
-    created = xTaskCreatePinnedToCore(c3_receiver_task,
-                                       "c3_rx",
-                                       4096,
-                                       NULL,
-                                       2,
-                                       NULL,
-                                       0);
     assert(created == pdTRUE);
 }

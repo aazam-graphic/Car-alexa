@@ -3,7 +3,6 @@
 #include "matrix_fx.h"
 #include "led_matrix.h"
 #include "car_os.h"
-#include "c3_wireless.h"
 #include "input_events.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -13,7 +12,7 @@
 #include <math.h>
 #include <string.h>
 
-#define SHOW_COUNT 21
+#define SHOW_COUNT 20
 /* 30 FPS target. car loop runs at 20 ms while a matrix show is active, so a
    30 ms cadence is reachable (2 of every 3 loop iterations) and gives every
    show a stable, jitter-free frame budget. The particle sim uses this as its
@@ -32,8 +31,7 @@ static const char *const s_names[SHOW_COUNT] = {
     "Rainbow Ribbon", "Aurora Veil", "Peacock Dance", "Fireworks", "Starfield Warp",
     "Plasma Dreams", "Digital Rain", "Living Flame", "Ocean Tide", "Dancing Butterfly",
     "Blooming Flower", "Spiral Galaxy", "Meteor Shower", "Heart Pulse", "Neon Orbit",
-    "Electric Storm", "Confetti Party", "Rainbow Falls", "Firefly Garden", "Kaleidoscope",
-    "Mic Spectrum"
+    "Electric Storm", "Confetti Party", "Rainbow Falls", "Firefly Garden", "Kaleidoscope"
 };
 static const char *const s_desc[SHOW_COUNT] = {
     "A flowing rainbow wave across every pixel", "Northern lights ripple in emerald and violet",
@@ -45,8 +43,7 @@ static const char *const s_desc[SHOW_COUNT] = {
     "Meteor trails sweep across the night sky", "A pulsing heart glows in shifting colour",
     "Rings of neon light expand and orbit", "Electric bolts flash through a storm",
     "Bright confetti drifts through a party", "A cascading rainbow waterfall shimmers",
-    "Warm fireflies glow in a tiny garden", "Mirrored geometry turns into a prism",
-    "Live 23-band wireless mic spectrum"
+    "Warm fireflies glow in a tiny garden", "Mirrored geometry turns into a prism"
 };
 
 static uint8_t s_index;
@@ -166,28 +163,11 @@ static void draw_pixel(uint8_t fx, int x, int y, uint32_t t)
         put(x, y, (uint16_t)(112 + ((seed >> 19) % 35u)), 250, v);
         break;
     }
-    case 7: { /* living flame (tilt-reactive + blow flare) */
-        static uint32_t s_flare_until = 0;
-        if (g.c3_connected && (g.c3_mic_evt & C3_MIC_EVT_BLOW)) {
-            s_flare_until = t + 800;
-        }
-        float tilt = 0.0f;
-        if (g.c3_connected) {
-            tilt = g.c3_roll / 45.0f;
-            if (tilt > 1.0f) tilt = 1.0f;
-            if (tilt < -1.0f) tilt = -1.0f;
-        }
-        bool flare = (t < s_flare_until);
+    case 7: { /* living flame */
         float flicker = sinf(xf * 1.7f + t * 0.009f) + sinf(xf * 0.53f - t * 0.004f)
                       + ((float)((seed + t / 37u) & 15u) / 15.0f - 0.5f);
         float heat = ((float)(h - 1 - y) / (float)h) * 225.0f + flicker * 45.0f;
-        /* tilt: shift heat column */
-        heat += tilt * (xf - (float)w / 2.0f) * 6.0f;
-        if (flare) heat += 80.0f;
-        uint8_t hv = (uint8_t)(heat < 0 ? 0 : heat > 255 ? 255 : heat);
-        uint16_t hue = flare ? 0 : (uint16_t)(5 + heat * 0.17f);
-        uint8_t sat = flare ? 40 : 255;
-        put(x, y, hue, sat, hv);
+        put(x, y, (uint16_t)(5 + heat * 0.17f), 255, (uint8_t)(heat < 0 ? 0 : heat > 255 ? 255 : heat));
         break;
     }
     case 8: { /* ocean tide */
@@ -303,19 +283,6 @@ static void draw_pixel(uint8_t fx, int x, int y, uint32_t t)
             if (x == fx && y == fy + bob) { v = (uint8_t)(140 + (hash32(t / 270u + i) & 115u)); hue = (uint16_t)(38 + i * 14); }
         }
         put(x, y, hue, 225, v);
-        break;
-    }
-    case 20: { /* mic spectrum (23 bands) */
-        int band = x;
-        if (band >= C3_SPEC_BANDS) band = C3_SPEC_BANDS - 1;
-        uint8_t v = g.c3_connected ? g.c3_spectrum[band] : 0;
-        int barh = (int)v * (h - 2) / 255;
-        if (y >= h - 1 - barh) {
-            uint8_t vv = (uint8_t)(180 + (h - 1 - y) * 4);
-            put(x, y, (uint16_t)(band * 11 + t / 20u), 255, vv);
-        } else {
-            put(x, y, 0, 0, 2);
-        }
         break;
     }
     default: { /* mirrored kaleidoscope */

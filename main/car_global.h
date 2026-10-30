@@ -98,28 +98,6 @@ typedef struct car_state {
 
     uint8_t gear;               /* Car OS: virtual gear 0..4 (gear_caps cap speed) */
 
-    /* ---- v12 smart automations ---- */
-    bool auto_gear;             /* automatic 5-speed transmission */
-    bool gyro_steer;            /* tilt-steer via C3 MPU-6500 roll */
-    bool vr_gimbal;             /* VR gimbal servo aiming via C3 */
-    bool smart_turn;            /* auto turn signals from steering */
-    bool smart_drl;             /* switchback DRL on GPIO17/15 */
-    bool auto_mist;             /* auto mist on turbo/upshift */
-    bool table_fire;            /* tabletop fire matrix enable */
-    bool cruise_on;             /* adaptive cruise control */
-    uint8_t cruise_spd;         /* locked cruise speed % */
-    bool ess_strobe;            /* emergency stop signal strobe */
-    uint32_t ess_until;         /* ess strobe expiry ms */
-    uint8_t clk_style;          /* standby clock style 0..4 */
-
-    /* ---- C3 handheld link cache (updated from c3_receiver) ---- */
-    bool c3_connected;
-    float c3_roll, c3_pitch, c3_yaw;
-    uint8_t c3_gestures;
-    uint8_t c3_mic_evt;
-    uint8_t c3_spectrum[23];
-    uint32_t c3_last_rx;
-
 } car_state_t;
 
 extern car_state_t g;
@@ -144,23 +122,6 @@ uint8_t  car_get_mx_fx(void);                      /* 0 minimal 1 full */
 void     car_set_mx_fx(uint8_t v);
 void     car_cycle_gear(void);                     /* g.gear = (g.gear+1)%5 */
 uint8_t  car_speed_cap_pct(void);                  /* min(speed_cap, gear_caps[gear]) */
-/* v12 smart automation toggles (NVS-persisted via car_settings_save) */
-bool     car_get_auto_gear(void);
-void     car_set_auto_gear(bool v);
-bool     car_get_gyro_steer(void);
-void     car_set_gyro_steer(bool v);
-bool     car_get_vr_gimbal(void);
-void     car_set_vr_gimbal(bool v);
-bool     car_get_smart_turn(void);
-void     car_set_smart_turn(bool v);
-bool     car_get_smart_drl(void);
-void     car_set_smart_drl(bool v);
-bool     car_get_auto_mist(void);
-void     car_set_auto_mist(bool v);
-bool     car_get_table_fire(void);
-void     car_set_table_fire(bool v);
-uint8_t  car_get_clk_style(void);
-void     car_set_clk_style(uint8_t v);
 void     car_sfx_click(void);                      /* short UI click */
 void     car_sfx_score(void);                      /* score blip */
 void     car_sfx_bad(void);                        /* error/crash */

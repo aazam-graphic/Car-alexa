@@ -208,7 +208,7 @@ static void go(os_ctx_t *ctx, os_state_t st, uint32_t now)
     if (is_menu_state(st) && is_menu_state(ctx->state)) {
         os_win_push(ctx, ctx->state);
     } else if (st == OS_DRIVE_MAIN || st == OS_BOOT || st == OS_HOME ||
-               st == OS_STANDBY || st == OS_DRIVE_ARMING || st == OS_GHOST_DVR ||
+               st == OS_STANDBY || st == OS_DRIVE_ARMING || st == OS_MATRIX_SHOW ||
                (st >= OS_GAME_1 && st <= OS_GAME_6)) {
         ctx->win_depth = 0;
     }
@@ -244,8 +244,7 @@ static const char *s_names[] = {
     "BOOT", "HOME", "DRIVE", "ANALYTICS", "DIAG", "SETTINGS",
     "GAMES", "LANE RUNNER", "NEON SERPENT", "REFLEX", "MEMORY", "SENSOR",
     "NEON RUNNER",
-    "SCORE", "TRIP", "CONNECT", "NOTIFY", "STANDBY", "ARMING", "MATRIX SHOW",
-    "LIGHT STUDIO", "MEGAPHONE", "GYRO LAB", "AUTOPILOT", "MIST TURBO", "GHOST DVR"
+    "SCORE", "TRIP", "CONNECT", "NOTIFY", "STANDBY", "ARMING", "MATRIX SHOW"
 };
 static const char *s_hints[] = {
     "", "A:OPEN B:CLOCK RB:PAGE", "A/B:MENU RS:GEAR", "B:MENU", "L/R:TAB A/B:MENU",
@@ -253,18 +252,17 @@ static const char *s_hints[] = {
     "UP/DN:SEL A:PLAY B:MENU", "B:EXIT", "B:EXIT", "B:EXIT", "B:EXIT", "B:EXIT",
     "B:EXIT",
     "B:BACK", "A:RESET B:BACK", "B:BACK", "UP/DN:SCROLL B:BACK", "START:MENU", "WAIT...",
-    "LEFT/RIGHT:FX A:AUTOPLAY B:HOME",
-    "B:HOME", "B:HOME", "B:HOME", "B:HOME", "B:HOME", "B:HOME"
+    "LEFT/RIGHT:FX A:AUTOPLAY B:HOME"
 };
 
 const char *os_state_name(os_state_t st)
 {
-    return (st >= 0 && st <= OS_GHOST_DVR) ? s_names[st] : "?";
+    return (st >= 0 && st <= OS_MATRIX_SHOW) ? s_names[st] : "?";
 }
 
 const char *os_state_hint(os_state_t st)
 {
-    return (st >= 0 && st <= OS_GHOST_DVR) ? s_hints[st] : "";
+    return (st >= 0 && st <= OS_MATRIX_SHOW) ? s_hints[st] : "";
 }
 
 /* ---- Alexa bridge entry points (car_task context only) ------------------ */
@@ -272,7 +270,7 @@ os_ctx_t *car_os_ctx(void) { return s_ctx; }
 
 void os_request_screen(os_ctx_t *ctx, int st, uint32_t now)
 {
-    if (!ctx || st < OS_BOOT || st > OS_GHOST_DVR) return;
+    if (!ctx || st < OS_BOOT || st > OS_MATRIX_SHOW) return;
     if (g.estop && st != OS_HOME) return;
     go(ctx, (os_state_t)st, now);
 }
@@ -294,12 +292,6 @@ input_context_t os_context(void)
         return INPUT_CTX_GAME;
     case OS_STANDBY:                       return INPUT_CTX_STANDBY;
     case OS_DRIVE_ARMING:                   return INPUT_CTX_ARMING;
-    case OS_LIGHT_STUDIO:
-    case OS_MEGAPHONE:
-    case OS_GYRO_LAB:
-    case OS_AUTOPILOT:
-    case OS_MIST_TURBO:
-    case OS_GHOST_DVR:                     return INPUT_CTX_OS;
     default:                                 return INPUT_CTX_OS;
     }
 }
@@ -325,6 +317,7 @@ void os_init(os_ctx_t *ctx)
     ctx->diag_tab = 0;
     ctx->drive_sub_view = 0;    /* VIEW 1 COCKPIT default (1.md 3.4) */
     ctx->cockpit_theme = 1;     /* SOLAR LIGHT default outdoor (1.md 3.5) */
+    ctx->sb_design = 0;          /* standby clock design: TABLE (default) */
 
     /* Analytics history (guide 2.5): ONE PSRAM block split into 3 ring buffers.
        If PSRAM is unavailable, retry with a reduced 64-sample block in internal
@@ -677,6 +670,9 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
             go(ctx, OS_HOME, now);
             break;
         }
+        /* RB/LB cycle the 5 standby clock designs (standby-only) */
+        if (tap & B_RB) { ctx->sb_design = (uint8_t)((ctx->sb_design + 1) % 5); car_sfx_blip(900); snd_play("ui_nav"); input_consume(B_RB); }
+        if (tap & B_LB) { ctx->sb_design = (uint8_t)((ctx->sb_design + 4) % 5); car_sfx_blip(900); snd_play("ui_nav"); input_consume(B_LB); }
         /* A tap = headlight (tap only — hold/mist stays dead in idle) */
         if (ev_tap(B_A)) {
             g.headlight = !g.headlight;
@@ -716,23 +712,6 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
         if (tap & B_DUP)    { g.hazard = !g.hazard; car_sfx_blip(1200); }
         if (tap & B_DLEFT)  { g.sig_l = !g.sig_l;  g.sig_r = false; car_sfx_blip(1000); }
         if (tap & B_DRIGHT) { g.sig_r = !g.sig_r;  g.sig_l = false; car_sfx_blip(1000); }
-        /* v12: clock style cycling (LB/RB) */
-        if (ev_tap(B_LB)) {
-            uint8_t s = car_get_clk_style();
-            s = (s == 0) ? 4 : s - 1;
-            car_set_clk_style(s);
-            car_settings_save();
-            car_sfx_click();
-            input_consume(B_LB);
-        }
-        if (ev_tap(B_RB)) {
-            uint8_t s = car_get_clk_style();
-            s = (s + 1) % 5;
-            car_set_clk_style(s);
-            car_settings_save();
-            car_sfx_click();
-            input_consume(B_RB);
-        }
         if (tap & (B_X | B_LB | B_RB | B_BACK | B_DDOWN |
                    B_LS | B_RS)) {
             input_consume(B_X); input_consume(B_LB);
@@ -1187,16 +1166,6 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
         break;
     }
 
-    case OS_LIGHT_STUDIO:
-    case OS_MEGAPHONE:
-    case OS_GYRO_LAB:
-    case OS_AUTOPILOT:
-    case OS_MIST_TURBO:
-    case OS_GHOST_DVR: {
-        if (tap & B_B) { os_win_pop(ctx, now); input_consume(B_B); }
-        break;
-    }
-
     case OS_GAMES_HUB:                 /* persistent game_sel (guide 2.2) */
         if (tap & B_DUP)   { ctx->game_sel = (ctx->game_sel + OS_GAME_COUNT - 1) % OS_GAME_COUNT; car_sfx_blip(900); }
         if (tap & B_DDOWN) { ctx->game_sel = (ctx->game_sel + 1) % OS_GAME_COUNT; car_sfx_blip(900); }
@@ -1516,12 +1485,6 @@ void os_draw_tft(os_ctx_t *ctx, uint32_t now)
     case OS_TRIP:            ui_mark_dirty(0, 22, 320, 198); os_scr_trip(ctx, now); break;
     case OS_CONN:            ui_mark_dirty(0, 22, 320, 198); os_scr_conn(ctx, now); break;
     case OS_NOTIF:           ui_mark_dirty(0, 22, 320, 198); os_scr_notif(ctx, now); break;
-    case OS_LIGHT_STUDIO:    ui_mark_dirty(0, 22, 320, 198); os_scr_light_studio(ctx, now); break;
-    case OS_MEGAPHONE:       ui_mark_dirty(0, 22, 320, 198); os_scr_megaphone(ctx, now); break;
-    case OS_GYRO_LAB:        ui_mark_dirty(0, 22, 320, 198); os_scr_gyro_lab(ctx, now); break;
-    case OS_AUTOPILOT:       ui_mark_dirty(0, 22, 320, 198); os_scr_autopilot(ctx, now); break;
-    case OS_MIST_TURBO:      ui_mark_dirty(0, 22, 320, 198); os_scr_mist_turbo(ctx, now); break;
-    case OS_GHOST_DVR:       ui_mark_dirty(0, 22, 320, 198); os_scr_ghost_dvr(ctx, now); break;
     default: break;                            /* games draw themselves */
     }
 

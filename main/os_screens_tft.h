@@ -37,13 +37,6 @@ void os_scr_matrix_snake(const os_ctx_t *ctx, uint32_t now);
 void os_scr_matrix_breaker(const os_ctx_t *ctx, uint32_t now);
 void os_scr_matrix_show(const os_ctx_t *ctx, uint32_t now);
 void os_scr_matrix_runner(const os_ctx_t *ctx, uint32_t now);
-/* v12 app screens */
-void os_scr_light_studio(os_ctx_t *ctx, uint32_t now);
-void os_scr_megaphone(os_ctx_t *ctx, uint32_t now);
-void os_scr_gyro_lab(os_ctx_t *ctx, uint32_t now);
-void os_scr_autopilot(os_ctx_t *ctx, uint32_t now);
-void os_scr_mist_turbo(os_ctx_t *ctx, uint32_t now);
-void os_scr_ghost_dvr(os_ctx_t *ctx, uint32_t now);
 
 #ifdef __cplusplus
 }
