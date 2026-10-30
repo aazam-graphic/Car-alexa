@@ -146,7 +146,7 @@ typedef struct {
     uint8_t picker_prev_r, picker_prev_g, picker_prev_b;
     uint8_t drive_sub_view;         /* cockpit VIEW 0..3 (1.md 3.4, BACK tap cycles) */
     uint8_t cockpit_theme;          /* 0 NIGHT 1 SOLAR (default) 2 SUNLIGHT (BACK hold cycles) */
-    uint8_t sb_design;              /* standby clock design 0..4 (RB/LB change, standby only) */
+    uint8_t sb_design;              /* standby clock design 0..5 (RB/LB change, standby only) */
     uint8_t radar_view;             /* 0=visual radar 1=details page          */
     uint32_t radar_cal_ms;          /* monotonic ms of last A (CAL) action     */
     uint8_t gear_flash;             /* gear change flash counter (guide §10) */

@@ -671,8 +671,8 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
             break;
         }
         /* RB/LB cycle the 5 standby clock designs (standby-only) */
-        if (tap & B_RB) { ctx->sb_design = (uint8_t)((ctx->sb_design + 1) % 5); car_sfx_blip(900); snd_play("ui_nav"); input_consume(B_RB); }
-        if (tap & B_LB) { ctx->sb_design = (uint8_t)((ctx->sb_design + 4) % 5); car_sfx_blip(900); snd_play("ui_nav"); input_consume(B_LB); }
+        if (tap & B_RB) { ctx->sb_design = (uint8_t)((ctx->sb_design + 1) % 6); car_sfx_blip(900); snd_play("ui_nav"); input_consume(B_RB); }
+        if (tap & B_LB) { ctx->sb_design = (uint8_t)((ctx->sb_design + 5) % 6); car_sfx_blip(900); snd_play("ui_nav"); input_consume(B_LB); }
         /* A tap = headlight (tap only — hold/mist stays dead in idle) */
         if (ev_tap(B_A)) {
             g.headlight = !g.headlight;
