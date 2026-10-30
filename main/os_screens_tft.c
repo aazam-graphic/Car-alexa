@@ -164,6 +164,58 @@ static void sb_str_upper(char *s)
         if (*s >= 'a' && *s <= 'z') *s = (char)(*s - 32);
 }
 
+/* Helper: draw thick vector digit (no slash, no gap) using gfx_rect */
+static void drawSmoothDigit(int16_t x, int16_t y, int digit, int16_t w, int16_t h, int16_t t, uint16_t col)
+{
+    static const uint8_t segs[10][7] = {
+        {1,1,1,0,1,1,1}, {0,0,1,0,0,1,0}, {1,0,1,1,1,0,1},
+        {1,0,1,1,0,1,1}, {0,1,1,1,0,1,0}, {1,1,0,1,0,1,1},
+        {1,1,0,1,1,1,1}, {1,0,1,0,0,1,0}, {1,1,1,1,1,1,1},
+        {1,1,1,1,0,1,1}
+    };
+    if (digit < 0 || digit > 9) return;
+    int h2 = h / 2;
+    const uint8_t *s = segs[digit];
+    if (digit == 1) { gfx_rect(x + w - t - 2, y, t, h, col); return; }
+    if (s[0]) gfx_rect(x + 1, y, w - 2, t, col);
+    if (s[1]) gfx_rect(x, y + 1, t, h2 - 1, col);
+    if (s[2]) gfx_rect(x + w - t, y + 1, t, h2 - 1, col);
+    if (s[3]) gfx_rect(x + 1, y + h2 - (t / 2), w - 2, t, col);
+    if (s[4]) gfx_rect(x, y + h2, t, h - h2 - 1, col);
+    if (s[5]) gfx_rect(x + w - t, y + h2, t, h - h2 - 1, col);
+    if (s[6]) gfx_rect(x + 1, y + h - t, w - 2, t, col);
+}
+
+/* Helper: bullet (•) drawn as pure rectangle - no '???' */
+static int16_t drawBulletPoint(int16_t x, int16_t y, uint16_t col)
+{
+    gfx_rect(x + 2, y + 2, 3, 3, col);
+    return x + 9;
+}
+
+/* Helper: degree symbol drawn via small rect + C */
+static int16_t drawDegreeC(int16_t x, int16_t y, uint16_t col, uint16_t bg)
+{
+    gfx_rect(x + 1, y, 3, 3, col);
+    gfx_text_small(x + 6, y, "C", col);
+    return x + 12;
+}
+
+/* Helper: clean card with subtle border */
+static void drawCleanCard(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t fillCol, uint16_t borderCol)
+{
+    gfx_rect(x + 2, y + 1, w - 4, h - 2, fillCol);
+    gfx_rect(x + 1, y + 2, w - 2, h - 4, fillCol);
+    gfx_hline(x + 2, y, w - 4, borderCol);
+    gfx_hline(x + 2, y + h - 1, w - 4, borderCol);
+    gfx_vline(x, y + 2, h - 4, borderCol);
+    gfx_vline(x + w - 1, y + 2, h - 4, borderCol);
+    gfx_px(x + 1, y + 1, borderCol);
+    gfx_px(x + w - 2, y + 1, borderCol);
+    gfx_px(x + 1, y + h - 2, borderCol);
+    gfx_px(x + w - 2, y + h - 2, borderCol);
+}
+
 void os_scr_standby(os_ctx_t *ctx, uint32_t now)
 {
     /* LAG FIX Oct 2026: clock needs 4 FPS max (colon blink); skip rest. */
@@ -330,45 +382,70 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
             struct tm tm; localtime_r(&t, &tm); int hh12 = tm.tm_hour%12; if(hh12==0) hh12=12;
             gfx_clear(RGB565(240,242,246));   /* #EEF2F6 soft cool-gray outer bg */
 
-            /* 1. TOP CARD: RANGEFINDER LINEAR SEC TAPE */
+
+            /* 1. TOP CARD: RANGEFINDER LINEAR SEC TAPE (full width ±16 sec, needle y=30) */
             gfx_rect(8,8,304,72, RGB565(255,255,255)); gfx_rect_outline(8,8,304,72, RGB565(216,224,234));
             gfx_text_small(14,14,"RANGEFINDER LINEAR SEC TAPE",RGB565(132,138,150));
-            /* Orange triangle needle + sec counter at right */
+            /* Orange triangle indicator + sec counter at right */
             gfx_rect(242,12,6,6, RGB565(255,108,0)); gfx_text_small(254,12,"59 SEC",RGB565(255,108,0));
-            /* Linear tape: scale centered on current second */
-            int cx_tape = 160; int cy_tape = 58;
-            for(int i=-3;i<=22;i++){
-                int val=(tm.tm_sec+i+60)%60; bool major=(val%5==0); bool center=(i==0);
-                int x=cx_tape+i*11; int h=(major?14:6);
-                gfx_rect(x,cy_tape-h/2,1,h, center?RGB565(30,32,40):(major?RGB565(30,32,40):RGB565(176,182,192)));
-                if(major){ char lbl[4]; snprintf(lbl,sizeof(lbl),"%02d",val); gfx_text_small(x-6,cy_tape-24,lbl,RGB565(30,32,40)); }
+            /* Linear tape: full width centered on current second (tickBotY = cardY + 62) */
+            int cx_tape = 160; int tickBotY = 70;
+            for(int secOff=-16; secOff<=16; secOff++){
+                int secVal=(tm.tm_sec + secOff + 60)%60; bool major=(secVal%5==0); bool center=(secOff==0);
+                int tx = cx_tape + secOff*9;
+                if(tx < 12 || tx > 308) continue;
+                int h=(major?12:6); int y=tickBotY - h/2;
+                gfx_rect(tx, y, 1, h, center?RGB565(255,108,0):(major?RGB565(30,32,40):RGB565(176,182,192)));
+                if(major){ char lbl[4]; snprintf(lbl,sizeof(lbl),"%02d",secVal); gfx_text_small(tx-6,tickBotY-22,lbl,RGB565(30,32,40)); }
             }
-            /* Bold orange needle at current sec (center i==0) */
-            gfx_rect(cx_tape-1, 8, 3, 58, RGB565(255,108,0));
+            /* Needle lowered to y=30 so it does NOT cut through TAPE text (y~14-22) */
+            gfx_rect(cx_tape-1, 30, 3, 40, RGB565(255,108,0));
 
-            /* 2. MIDDLE-LEFT: CHRONOGRAPH */
+            /* 2. MIDDLE-LEFT: CHRONOGRAPH (thick smooth digits, PM pill) */
             gfx_rect(8,88,196,104, RGB565(255,255,255)); gfx_rect_outline(8,88,196,104, RGB565(216,224,234));
             gfx_text_small(14,98,"CHRONOGRAPH",RGB565(132,138,150));
             /* Peach pill AM/PM */
             gfx_rect(254,94,28,16, RGB565(255,240,220)); gfx_text_small(258,98,"PM",RGB565(217,83,15));
-            /* Big clock: hour + orange colon dots + minute */
-            char hrStr[4]; snprintf(hrStr,sizeof(hrStr),"%02d",hh12);
-            char mnStr[4]; snprintf(mnStr,sizeof(mnStr),"%02d",tm.tm_min);
-            gfx_text_large(20,140,hrStr,RGB565(15,20,40));
+            /* Big smooth clock: hour digits (28x50, thickness 7) + orange colon + minute digits */
+            int h1 = (hh12 / 10) % 10; int h2 = hh12 % 10;
+            int m1 = (tm.tm_min / 10) % 10; int m2 = tm.tm_min % 10;
+            int clockY = 120; int dW=28, dH=50, dT=7;
+            drawSmoothDigit(16, clockY, h1, dW, dH, dT, RGB565(15,20,40));
+            drawSmoothDigit(52, clockY, h2, dW, dH, dT, RGB565(15,20,40));
             /* Orange colon dots */
-            gfx_rect(92,148,4,4,RGB565(255,108,0)); gfx_rect(92,164,4,4,RGB565(255,108,0));
-            gfx_text_large(106,140,mnStr,RGB565(15,20,40));
+            gfx_rect(92, clockY+13, 6, 8, RGB565(255,108,0)); gfx_rect(92, clockY+31, 6, 8, RGB565(255,108,0));
+            drawSmoothDigit(108, clockY, m1, dW, dH, dT, RGB565(15,20,40));
+            drawSmoothDigit(144, clockY, m2, dW, dH, dT, RGB565(15,20,40));
 
-            /* 3. MIDDLE-RIGHT: ORANGE DATE CARD */
+            /* 3. MIDDLE-RIGHT: ORANGE DATE CARD (actual date from tm) */
             gfx_rect(212,88,100,104, RGB565(255,108,0));
-            gfx_text_small(226,98,"THU",RGB565(255,255,255));
-            gfx_text_large(226,120,"29",RGB565(255,255,255));
-            gfx_text_small(226,140,"OCT  •  28°C",RGB565(255,255,255));
+            /* Weekday from tm.tm_wday: Sun=0 ... Fri=5 -> "FRI" */
+            const char* wdays[] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
+            gfx_text_small(226,98,wdays[tm.tm_wday],RGB565(255,255,255)); /* y=98 */
+            /* Actual day number at y=118 */
+            int dayNumReal = tm.tm_mday > 0 ? tm.tm_mday : 30;  /* fallback 30 Oct */
+            int d1r = (dayNumReal/10)%10; int d2r = dayNumReal%10;
+            drawSmoothDigit(226, 118, d1r, 22, 36, 5, RGB565(255,255,255));
+            drawSmoothDigit(250, 118, d2r, 22, 36, 5, RGB565(255,255,255));
+            /* Row 3 at y=172: OCT • 28°C */
+            int row3Y = 172;
+            gfx_text_small(226, row3Y, "OCT", RGB565(255,255,255));
+            int curX = 226 + 3*6 + 4;
+            curX = drawBulletPoint(curX, row3Y, RGB565(255,255,255));
+            gfx_text_small(curX, row3Y, "28", RGB565(255,255,255));
+            int curXc = curX + 3*6;
+            curXc = drawDegreeC(curXc, row3Y, RGB565(255,255,255), RGB565(255,108,0));
 
             /* 4. BOTTOM STATUS BAR */
             gfx_rect(8,200,304,32, RGB565(255,255,255)); gfx_rect_outline(8,200,304,32, RGB565(216,224,234));
             gfx_rect(20,214,8,8, RGB565(16,185,129)); /* green dot */
-            gfx_text_small(32,206,"DELHI  •  28°C  SUNNY",RGB565(15,20,40));
+            gfx_text_small(32,206,"DELHI",RGB565(15,20,40));
+            int curXb = 32 + 5*6;              /* tight spacing after DELHI */
+            curXb = drawBulletPoint(curXb, 206, RGB565(15,20,40));
+            gfx_text_small(curXb, 206, "28", RGB565(15,20,40));
+            int tempCur = curXb + 2*6;
+            tempCur = drawDegreeC(tempCur, 206, RGB565(15,20,40), RGB565(255,255,255));
+            gfx_text_small(tempCur + 4, 206, "SUNNY", RGB565(15,20,40));
             gfx_text_small(232,206,"RH 44%",RGB565(132,138,150));
         }
         else { /* Fallback placeholder for out-of-range design */
@@ -382,10 +459,6 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
             gfx_text_center_box(0, 180, 320, "-- / -- / ----", UI_FONT_SMALL, SB_MUTED);
         }
     }
-
-    /* subtle centered PRESS START */
-    gfx_rect_outline(106, 204, 108, 20, SB_MUTED);
-    gfx_text_small(117, 210, "PRESS START", SB_INK);
 
     /* sync toast 1.5 s only */
     if (s_toast_until && (int32_t)(s_toast_until - now) > 0) {
