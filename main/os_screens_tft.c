@@ -378,9 +378,23 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
             gfx_rect(236,86,74,42,RGB565(245,210,140)); gfx_text_small(242,92,"TEMP",RGB565(30,32,40)); gfx_text_large(242,100,"28C",RGB565(30,32,40));
             gfx_rect(236,136,74,30,RGB565(240,240,240)); gfx_text_small(242,142,"RH 44%",RGB565(80,85,95));
         }
-        else if (design == 4) { /* CONCEPT 5 — RANGEFINDER / DASHBOARD (ref: dashboard_320x240) */
+        else if (design == 4) { /* DYNAMIC WEATHER CLOCK — updates from tm + weather */
             struct tm tm; localtime_r(&t, &tm); int hh12 = tm.tm_hour%12; if(hh12==0) hh12=12;
-            gfx_clear(RGB565(240,242,246));   /* #EEF2F6 soft cool-gray outer bg */
+
+            /* 1. SKY GRADIENT BACKGROUND (dynamic by time) */
+            int hour = tm.tm_hour;
+            uint16_t topC, botC;
+            if (hour >= 6 && hour < 18) { topC = RGB565(60,150,245); botC = RGB565(135,200,255); }   /* sunny */
+            else if (hour >= 18 && hour < 21) { topC = RGB565(42,24,78); botC = RGB565(245,155,55); } /* sunset */
+            else { topC = RGB565(6,10,26); botC = RGB565(32,52,100); } /* night */
+            for (int y = 0; y < 240; y++) {
+                int mix = y / 2;
+                uint16_t c = RGB565((uint8_t)(((uint32_t)(topC >> 11) * (240-y))/240),
+                                    (uint8_t)(((uint32_t)((topC>>5)&0x3F) * (240-y))/240),
+                                    (uint8_t)(((uint32_t)(topC & 0x1F) * (240-y))/240));
+                gfx_hline(0, y, 320, c);  /* simplified gradient line */
+            }
+            gfx_clear(topC);  /* base */
 
 
             /* 1. TOP CARD: RANGEFINDER LINEAR SEC TAPE (full width ±16 sec, needle y=30) */
@@ -447,6 +461,35 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
             tempCur = drawDegreeC(tempCur, 206, RGB565(15,20,40), RGB565(255,255,255));
             gfx_text_small(tempCur + 4, 206, "SUNNY", RGB565(15,20,40));
             gfx_text_small(232,206,"RH 44%",RGB565(132,138,150));
+        }
+        else if (design == 5) { /* WEATHER WALLPAPER — iPhone-style dynamic clock */
+            struct tm tm; localtime_r(&t, &tm); int hh12 = tm.tm_hour%12; if(hh12==0) hh12=12;
+            /* Sky gradient based on hour */
+            int h = tm.tm_hour;
+            uint16_t skyTop = (h>=6&&h<18)?RGB565(60,150,245):(h>=18&&h<21)?RGB565(42,24,78):RGB565(6,10,26);
+            uint16_t skyBot = (h>=6&&h<18)?RGB565(135,200,255):(h>=18&&h<21)?RGB565(245,155,55):RGB565(32,52,100);
+            for(int y=0; y<240; y++){ gfx_hline(0,y,320, (y<120)?skyTop:skyBot); }
+            /* Hero clock (large smooth digits) */
+            int h1=(hh12/10)%10, h2=hh12%10, m1=(tm.tm_min/10)%10, m2=tm.tm_min%10;
+            int cY=38, dW=28, dH=54, dT=7;
+            drawSmoothDigit(12,cY,h1,dW,dH,dT,RGB565(255,255,255));
+            drawSmoothDigit(46,cY,h2,dW,dH,dT,RGB565(255,255,255));
+            gfx_rect(82,cY+16,6,6,RGB565(255,255,255)); gfx_rect(82,cY+32,6,6,RGB565(255,255,255));
+            drawSmoothDigit(92,cY,m1,dW,dH,dT,RGB565(255,255,255));
+            drawSmoothDigit(126,cY,m2,dW,dH,dT,RGB565(255,255,255));
+            /* Temp row */
+            gfx_text_small(12,106,"28°C SUNNY  •  DELHI",RGB565(255,255,255));
+            /* Frosted bottom cards */
+            gfx_rect(8,158,96,74,RGB565(240,245,250)); gfx_rect_outline(8,158,96,74,RGB565(200,210,230));
+            gfx_text_small(16,166,"HUMIDITY",RGB565(120,130,145));
+            drawSmoothDigit(16,182,4,16,28,4,RGB565(30,32,40)); drawSmoothDigit(36,182,4,16,28,4,RGB565(30,32,40));
+            gfx_rect(56,218,80,5,RGB565(220,230,240)); gfx_rect(56,218,35,5,RGB565(255,108,0));
+            gfx_rect(112,158,96,74,RGB565(240,245,250)); gfx_rect_outline(112,158,96,74,RGB565(200,210,230));
+            gfx_text_small(120,166,"WIND",RGB565(120,130,145));
+            gfx_text_small(120,182,"14 KM/H  •  NW",RGB565(30,32,40));
+            gfx_rect(216,158,96,74,RGB565(240,245,250)); gfx_rect_outline(216,158,96,74,RGB565(200,210,230));
+            gfx_text_small(224,166,"FEELS LIKE",RGB565(120,130,145));
+            gfx_text_small(224,182,"30°C  •  28°C  LOW",RGB565(30,32,40));
         }
         else { /* Fallback placeholder for out-of-range design */
             gfx_text_medium(20, 14, "TABLE CLOCK", SB_INK);
