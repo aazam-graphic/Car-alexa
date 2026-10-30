@@ -388,7 +388,7 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
             else if (hour >= 18 && hour < 21) { topC = RGB565(42,24,78); botC = RGB565(245,155,55); } /* sunset */
             else { topC = RGB565(6,10,26); botC = RGB565(32,52,100); } /* night */
             for (int y = 0; y < 240; y++) {
-                int mix = y / 2;
+                /* mix removed */
                 uint16_t c = RGB565((uint8_t)(((uint32_t)(topC >> 11) * (240-y))/240),
                                     (uint8_t)(((uint32_t)((topC>>5)&0x3F) * (240-y))/240),
                                     (uint8_t)(((uint32_t)(topC & 0x1F) * (240-y))/240));
@@ -467,10 +467,11 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
             /* Sky gradient based on hour */
             int h = tm.tm_hour;
             bool night = (h>=19 || h<6);
-            uint16_t b_night[8] = {0x0002,0x0004,0x0826,0x0848,0x086A,0x108C,0x10CE,0x1110};
-            uint16_t b_day[8]  = {0x1339,0x1B9B,0x241D,0x2C7E,0x3CFE,0x4D7F,0x5DFF,0x767F};
-            uint16_t* b = night ? b_night : b_day;
-            for(int i=0;i<8;i++) gfx_rect(0,i*30,320,30,b[i]);
+            /* 240-line smooth gradient — no 8-strip stripe */
+            for(int y=0; y<240; y++){ uint8_t r,g,b;
+                if(night){ r=0+6*y/239; g=2+12*y/239; b=8+30*y/239; }
+                else { r=18+(77*y/239); g=90+(85*y/239); b=210+(40*y/239); }
+                gfx_hline(0,y,320, (uint16_t)(((r&0xF8)<<8)|((g&0xFC)<<3)|((b>>3)&0x1F))); }
             /* Night artwork: stars + crescent moon */
             if(night){
                 int sx[]={18,52,95,134,168,192,215,238,296,305,178,204,226,288,155,74,118,248};
@@ -478,8 +479,8 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
                 for(int s=0;s<18;s++) gfx_rect(sx[s],sy[s],(s%4==0)?2:1,(s%4==0)?2:1,(s%3==0)?RGB565(255,224,0):RGB565(255,255,255));
                 int mx=262,my=56,mr=22;
                 for(int dy=-mr; dy<=mr; dy++){ int dx=(int)sqrt(mr*mr-dy*dy); gfx_rect(mx-dx,my+dy,dx*2+1,1,RGB565(255,224,0)); }
-                int cx2=mx+9,cy2=my-5,cr=19;
-                for(int dy=-cr; dy<=cr; dy++){ int dx=(int)sqrt(cr*cr-dy*dy); int py=cy2+dy; uint16_t skyCol = (py>=0&&py<240)?b[py/30]:RGB565(240,245,250); gfx_rect(cx2-dx,py,dx*2+1,1,skyCol); }
+                int cx2=mx-8, cy2=my-5, cr=19;  /* ')' crescent: cutout on left of moon */
+                for(int dy=-cr; dy<=cr; dy++){ int dx=(int)sqrt(cr*cr-dy*dy); int py=cy2+dy; uint16_t skyCol = RGB565(8,104,104); gfx_rect(cx2-dx,py,dx*2+1,1,skyCol); }
             }
             else if(!night){
                 int sx2=258,sy2=58,sr2=24;
@@ -496,18 +497,20 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
             drawSmoothDigit(92,cY,m1,dW,dH,dT,RGB565(255,255,255));
             drawSmoothDigit(126,cY,m2,dW,dH,dT,RGB565(255,255,255));
             /* Temp row */
-            gfx_text_small(12,106,"28°C SUNNY  •  DELHI",RGB565(255,255,255));
+            gfx_text_small(12,106,"28",RGB565(255,255,255));
+            gfx_rect(36,106,3,3,RGB565(255,255,255));  /* pure rect bullet/degree */
+            gfx_text_small(42,106,"C  CLEAR NIGHT  •  DELHI",RGB565(255,255,255));
             /* Frosted bottom cards */
-            gfx_rect(8,158,96,74,RGB565(240,245,250)); gfx_rect_outline(8,158,96,74,RGB565(200,210,230));
-            gfx_text_small(16,166,"HUMIDITY",RGB565(120,130,145));
-            drawSmoothDigit(16,182,4,16,28,4,RGB565(30,32,40)); drawSmoothDigit(36,182,4,16,28,4,RGB565(30,32,40));
-            gfx_rect(56,218,80,5,RGB565(220,230,240)); gfx_rect(56,218,35,5,RGB565(255,108,0));
-            gfx_rect(112,158,96,74,RGB565(240,245,250)); gfx_rect_outline(112,158,96,74,RGB565(200,210,230));
-            gfx_text_small(120,166,"WIND",RGB565(120,130,145));
-            gfx_text_small(120,182,"14 KM/H  •  NW",RGB565(30,32,40));
-            gfx_rect(216,158,96,74,RGB565(240,245,250)); gfx_rect_outline(216,158,96,74,RGB565(200,210,230));
-            gfx_text_small(224,166,"FEELS LIKE",RGB565(120,130,145));
-            gfx_text_small(224,182,"30°C  •  28°C  LOW",RGB565(30,32,40));
+            gfx_rect(8,158,96,74,RGB565(8,104,104)); gfx_rect_outline(8,158,96,74,RGB565(58,84,84));
+            gfx_text_small(16,166,"HUMIDITY",RGB565(156,213,213));
+            drawSmoothDigit(16,182,4,16,28,4,RGB565(255,255,255)); drawSmoothDigit(36,182,4,16,28,4,RGB565(255,255,255));
+            gfx_rect(56,218,80,5,RGB565(2,36,36)); gfx_rect(56,218,35,5,RGB565(253,32,0));
+            gfx_rect(112,158,96,74,RGB565(8,104,104)); gfx_rect_outline(112,158,96,74,RGB565(58,84,84));
+            gfx_text_small(120,166,"WIND",RGB565(156,213,213));
+            gfx_text_small(120,182,"14 KM/H  NW",RGB565(255,255,255));
+            gfx_rect(216,158,96,74,RGB565(8,104,104)); gfx_rect_outline(216,158,96,74,RGB565(58,84,84));
+            gfx_text_small(224,166,"FEELS LIKE",RGB565(156,213,213));
+            gfx_text_small(224,182,"30  LOW",RGB565(255,255,255));
         }
         else { /* Fallback placeholder for out-of-range design */
             gfx_text_medium(20, 14, "TABLE CLOCK", SB_INK);
