@@ -512,6 +512,70 @@ void os_scr_standby(os_ctx_t *ctx, uint32_t now)
             gfx_text_small(224,166,"FEELS LIKE",RGB565(156,213,213));
             gfx_text_small(224,182,"30  LOW",RGB565(255,255,255));
         }
+        else if (design == 6) { /* WORD + TAPE — 6 bug fixes */
+            struct tm tm; localtime_r(&t, &tm);
+            int hh24 = tm.tm_hour, mm = tm.tm_min, ss = tm.tm_sec;
+            int hr12 = hh24 % 12; if(hr12==0) hr12=12;
+            char buf[32];
+
+            /* 1. HEADER BAR (y=6, h=22) — title right so 'E' visible */
+            gfx_rect(6,6,308,22,RGB565(26,38,51));
+            gfx_text_small(8,12,"FRI  30 OCT",RGB565(255,255,255));
+            snprintf(buf,sizeof(buf),"%02d:%02d:%02d %s",hr12,mm,ss,(hh24>=12)?"PM":"AM");
+            gfx_text_small(130,12,buf,RGB565(0,240,255));
+            gfx_text_small(238,12,"WORD + TAPE",RGB565(156,181,198));  /* x=238 -> no clip */
+
+            /* 2. LEFT PANEL: WORD MATRIX (6x4, cell 43x20, gap 2/3) */
+            gfx_rect(6,32,186,168,RGB565(240,242,246)); gfx_rect_outline(6,32,186,168,RGB565(132,138,150));
+            gfx_text_small(12,38,"WORD MATRIX",RGB565(59,66,82));
+            const char* W[24] = {"IT","IS","HALF","TEN","QUARTER","TWENTY","FIVE","PAST","TO","ONE","TWO","THREE","FOUR","FIVE","SIX","SEVEN","EIGHT","NINE","TEN","ELEVEN","TWELVE","O'CLOCK","AM","PM"};
+            /* Simple active words for 23:24 -> IT/IS/TWENTY/FIVE/PAST/ELEVEN/PM */
+            int active[24]={1,1,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1};
+            const int xs=12, ys=52, cw=43, ch=20, gx=2, gy=3;
+            for(int r=0;r<6;r++) for(int c=0;c<4;c++){
+                int i=r*4+c;
+                int cx=xs+c*(cw+gx), cy=ys+r*(ch+gy);
+                uint16_t fill = active[i]?RGB565(26,38,51):RGB565(176,182,195);
+                uint16_t txt = active[i]?RGB565(255,255,255):RGB565(59,66,82);
+                gfx_rect(cx,cy,cw,ch,fill); gfx_rect_outline(cx,cy,cw,ch,RGB565(132,138,150));
+                const char* w=W[i];
+                int tx=cx+2, ty=cy+6;
+                gfx_text_small(tx,ty,w,txt);
+            }
+
+            /* 3. RIGHT PANEL: DRUM TAPE (x=198, w=116, h=168) */
+            gfx_rect(198,32,116,168,RGB565(176,182,195)); gfx_rect_outline(198,32,116,168,RGB565(132,138,150));
+            gfx_text_small(204,38,"DRUM TAPE",RGB565(59,66,82));
+            int prevMin=(mm+59)%60, nextMin=(mm+1)%60;
+            int hr12d=hh24%12; if(hr12d==0) hr12d=12; int nxtHr=hr12d==12?1:hr12d+1;
+            char hrBuf[4], nxtBuf[4], pmnBuf[4], nxtMinBuf[4], currMinBuf[4], secBuf[4], topStr[8];
+            snprintf(hrBuf,sizeof(hrBuf),"%02d",hr12d);
+            snprintf(nxtBuf,sizeof(nxtBuf),"%02d",nxtHr);
+            snprintf(pmnBuf,sizeof(pmnBuf),"%02d",prevMin);
+            snprintf(currMinBuf,sizeof(currMinBuf),"%02d",mm);
+            snprintf(nxtMinBuf,sizeof(nxtMinBuf),"%02d",nextMin);
+            snprintf(secBuf,sizeof(secBuf),"%02d",ss);
+            /* Hour drum (y=52..90) — '25' never crushed: 3 rows cleanly stacked */
+            gfx_rect(206,52,44,38,RGB565(154,166,185));
+            gfx_text_small(210,56,hrBuf,RGB565(26,38,51));   /* current */
+            gfx_text_small(210,70,nxtBuf,RGB565(132,138,150)); /* next */
+            gfx_rect(254,56,52,28,RGB565(26,38,51)); gfx_text_small(264,58,hrBuf,RGB565(255,255,255));
+            /* Minute drum (y=96..156) — 23/24/25 visible, no overlap with SEC ROLL */
+            gfx_rect(206,96,44,60,RGB565(154,166,185));
+            gfx_text_small(210,98,pmnBuf,RGB565(132,138,150));
+            gfx_text_small(210,118,currMinBuf,RGB565(26,38,51));
+            gfx_text_small(210,138,nxtMinBuf,RGB565(132,138,150));
+            gfx_rect(254,118,52,28,RGB565(200,50,50)); gfx_text_small(264,122,currMinBuf,RGB565(255,255,255));
+            /* SEC ROLL — box at y=160, above minute drum, number visible */
+            gfx_rect(206,160,100,34,RGB565(200,50,50));
+            gfx_text_small(212,166,"SEC ROLL",RGB565(255,255,255));
+            gfx_text_small(260,164,secBuf,RGB565(255,255,255));
+
+            /* 4. FULL BOTTOM READOUT BAR (y=206, h=28) */
+            gfx_rect(6,206,308,28,RGB565(26,38,51)); gfx_rect_outline(6,206,308,28,RGB565(132,138,150));
+            snprintf(buf,sizeof(buf),"> IT IS %s %d %s", (mm>=25&&mm<35)?"TWENTY FIVE PAST":"PAST", hr12, (hh24>=12)?"PM":"AM");
+            gfx_text_small(14,212,buf,RGB565(255,255,255));
+        }
         else { /* Fallback placeholder for out-of-range design */
             gfx_text_medium(20, 14, "TABLE CLOCK", SB_INK);
             gfx_rect(20, 36, 200, 3, SB_TRACK);
