@@ -22,6 +22,7 @@
 
 #include <string.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
@@ -54,14 +55,21 @@ static const uint8_t s_report_map[] = {
     0x95, 0x10,        /*   Report Count (16) */
     0x81, 0x02,        /*   Input (Data,Var,Abs) */
     0x05, 0x01,        /*   Usage Page (Generic Desktop) */
-    0x09, 0x30,        /*   Usage (X) */
-    0x09, 0x31,        /*   Usage (Y) */
-    0x09, 0x32,        /*   Usage (Z) */
-    0x09, 0x35,        /*   Usage (Rz) */
+    0x09, 0x30,        /*   Usage (X) - left stick X  */
+    0x09, 0x31,        /*   Usage (Y) - left stick Y  */
+    0x09, 0x32,        /*   Usage (Z) - right stick X */
+    0x09, 0x35,        /*   Usage (Rz)- right stick Y */
     0x15, 0x81,        /*   Logical Minimum (-127) */
     0x25, 0x7F,        /*   Logical Maximum (127) */
     0x75, 0x08,        /*   Report Size (8) */
     0x95, 0x04,        /*   Report Count (4) */
+    0x81, 0x02,        /*   Input (Data,Var,Abs) */
+    0x09, 0x33,        /*   Usage (Rx) - left trigger  */
+    0x09, 0x34,        /*   Usage (Ry) - right trigger */
+    0x15, 0x00,        /*   Logical Minimum (0) */
+    0x26, 0xFF, 0x00,  /*   Logical Maximum (255) */
+    0x75, 0x08,        /*   Report Size (8) */
+    0x95, 0x02,        /*   Report Count (2) */
     0x81, 0x02,        /*   Input (Data,Var,Abs) */
     0xC0               /* End Collection */
 };
@@ -130,6 +138,18 @@ static int hid_proto_cb(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctx
     return 0;
 }
 
+/* Report Reference descriptor (0x2908): host needs this to map the Report
+   characteristic to "report ID 1, input" - Android/Windows HID-over-GATT
+   will not route notifications without it. */
+static const uint8_t s_rep_ref_in[2] = { 0x01, 0x01 };
+
+static int hid_rep_ref_cb(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    (void)conn; (void)attr; (void)arg;
+    return os_mbuf_append(ctxt->om, s_rep_ref_in, sizeof(s_rep_ref_in)) == 0
+           ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+
 static const struct ble_gatt_svc_def s_svcs[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
@@ -142,7 +162,13 @@ static const struct ble_gatt_svc_def s_svcs[] = {
             { .uuid = BLE_UUID16_DECLARE(0x2A4C), .access_cb = hid_ctrl_cb,
               .flags = BLE_GATT_CHR_F_WRITE_NO_RSP },
             { .uuid = BLE_UUID16_DECLARE(0x2A4D), .access_cb = hid_report_cb,
-              .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY },
+              .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+              .descriptors = (struct ble_gatt_dsc_def[]) {
+                  { .uuid = BLE_UUID16_DECLARE(0x2908),
+                    .att_flags = BLE_ATT_F_READ,
+                    .access_cb = hid_rep_ref_cb },
+                  { 0 }
+              } },
             { .uuid = BLE_UUID16_DECLARE(0x2A4E), .access_cb = hid_proto_cb,
               .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE_NO_RSP },
             { 0 }
@@ -176,8 +202,17 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_SUBSCRIBE:
-        if (event->subscribe.attr_handle == s_report_handle)
+        /* The input report is our only notify characteristic, so accept every
+           subscription instead of matching an exact handle (val_handle+1 is the
+           CCCD handle on some hosts). */
+        if (s_report_handle == 0 ||
+            event->subscribe.attr_handle == s_report_handle ||
+            event->subscribe.attr_handle == (uint16_t)(s_report_handle + 1)) {
             s_subscribed = event->subscribe.cur_notify;
+            ESP_LOGI(TAG, "input report %s (handle %u)",
+                     s_subscribed ? "SUBSCRIBED" : "unsubscribed",
+                     (unsigned)event->subscribe.attr_handle);
+        }
         return 0;
 
     case BLE_GAP_EVENT_MTU:
@@ -202,6 +237,12 @@ static void start_adv(void)
     fields.appearance_is_present = 1;
     fields.tx_pwr_lvl_is_present = 1;
     fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
+    /* HID service UUID in the advertising packet: phones/PCs can tell this is
+       a gamepad before connecting (appearance alone is not always enough). */
+    static const ble_uuid16_t hid_svc = BLE_UUID16_INIT(0x1812);
+    fields.uuids16 = (const ble_uuid16_t *)&hid_svc;
+    fields.num_uuids16 = 1;
+    fields.uuids16_is_complete = 1;
     const char *name = ble_svc_gap_device_name();
     fields.name = (uint8_t *)name;
     fields.name_len = (uint8_t)strlen(name);
@@ -227,6 +268,18 @@ static void on_sync(void)
 {
     int rc = ble_hs_util_ensure_addr(0);
     if (rc != 0) { ESP_LOGE(TAG, "ensure_addr rc=%d", rc); return; }
+
+    /* Attribute handles only exist after the host has started, so resolve the
+       input-report value handle here - doing it in xbox_bt_init() returns
+       BLE_HS_ENOENT and leaves s_report_handle at 0 (notify would never fire,
+       which is exactly why the phone got no input). */
+    if (!s_report_handle) {
+        rc = ble_gatts_find_chr(BLE_UUID16_DECLARE(0x1812),
+                                BLE_UUID16_DECLARE(0x2A4D), NULL, &s_report_handle);
+        if (rc == 0) ESP_LOGI(TAG, "report value handle=%u", (unsigned)s_report_handle);
+        else         ESP_LOGE(TAG, "report handle lookup rc=%d", rc);
+    }
+
     start_adv();
 }
 
@@ -268,9 +321,8 @@ void xbox_bt_init(void)
         return;
     }
 
-    rc = ble_gatts_find_chr(BLE_UUID16_DECLARE(0x1812),
-                            BLE_UUID16_DECLARE(0x2A4D), NULL, &s_report_handle);
-    if (rc != 0) ESP_LOGW(TAG, "report handle lookup rc=%d", rc);
+    /* NOTE: the input-report value handle is resolved in on_sync() - GATT
+       handles do not exist until the host has started. */
 
     nimble_port_freertos_init(host_task);
     ESP_LOGI(TAG, "BLE HID gamepad ready");
@@ -297,7 +349,14 @@ bool xbox_bt_connected(void)  { return s_subscribed && s_conn != BLE_HS_CONN_HAN
 
 void xbox_bt_poll(void)
 {
-    if (!s_enabled || !s_subscribed || s_conn == BLE_HS_CONN_HANDLE_NONE) return;
+    if (!s_enabled || !s_subscribed || !s_report_handle ||
+        s_conn == BLE_HS_CONN_HANDLE_NONE) return;
+
+    /* Cap at 100 Hz: the car loop can run faster than the radio should send. */
+    static int64_t s_last_us;
+    int64_t now_us = esp_timer_get_time();
+    if (s_last_us && now_us - s_last_us < 10000) return;
+    s_last_us = now_us;
 
     const xbox360_pad_t *p = xbox360_pad(0);
     uint8_t rep[8] = {0};

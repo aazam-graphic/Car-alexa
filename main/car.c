@@ -68,6 +68,7 @@
 #include "img_bank.h"   /* PART 6: late-init image preload */
 #include "notif.h"      /* PART 10.3 Notification Center feed */
 #include "mem_diag.h"   /* PART 15/16 memory diagnostics */
+#include "xbox_bt_bridge.h"  /* XBOX CTRL: pad -> phone BLE HID (owns the pad while on) */
 
 static const char *TAG = "car";
 
@@ -3730,7 +3731,20 @@ void car_task(void *arg)
         }
         prev_present = cur_present;
         uint16_t dig = pad ? (uint16_t)(pad->buttons >> 16) : 0;
+        /* XBOX CTRL (BLE HID) owns the pad while it is on: the phone must see
+           every key, so the car keeps only BACK - a 1.5 s hold hands control
+           back (handled in os_update). Masking here covers the car router AND
+           the OS router, so a press can never move the car UI. */
+        static bool s_bt_owns_prev = false;
+        bool bt_owns_pad = xbox_bt_is_enabled();
+        if (bt_owns_pad) dig &= B_BACK;
         uint16_t tap = (uint16_t)(dig & ~prev_dig);
+        if (bt_owns_pad != s_bt_owns_prev) {
+            /* mode flip: drop stale edges so a held key cannot fire a tap */
+            tap = 0;
+            prev_dig = dig;
+            s_bt_owns_prev = bt_owns_pad;
+        }
         if (pad && pad->present && dig && dig != prev_dig) s_last_dig = dig;
         prev_dig = dig;
 
@@ -3779,17 +3793,19 @@ void car_task(void *arg)
         /* NEON SERPENT arcade (120-LED matrix): active rehte input arcade
            ka hai ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â car controls frozen, motors parked. GUIDE kabhi
            consume nahi hota (car E-STOP hamesha chalta hai). */
-        bool arcade_eats;
-        if (matrix_show_active())
-            arcade_eats = matrix_show_route(dig, tap, now);
-        else if (neon_breaker_active())
-            arcade_eats = neon_breaker_route(pad, dig, tap, now);
-        else if (neon_raid_active())
-            arcade_eats = neon_raid_route(pad, dig, tap, now);
-        else if (runner_active())
-            arcade_eats = runner_route(pad, dig, tap, now);
-        else
-            arcade_eats = serpent_arcade_route(pad, dig, tap, now);
+        bool arcade_eats = false;
+        if (!bt_owns_pad) {   /* XBOX CTRL: phone owns the pad, no arcade bleed */
+            if (matrix_show_active())
+                arcade_eats = matrix_show_route(dig, tap, now);
+            else if (neon_breaker_active())
+                arcade_eats = neon_breaker_route(pad, dig, tap, now);
+            else if (neon_raid_active())
+                arcade_eats = neon_raid_route(pad, dig, tap, now);
+            else if (runner_active())
+                arcade_eats = runner_route(pad, dig, tap, now);
+            else
+                arcade_eats = serpent_arcade_route(pad, dig, tap, now);
+        }
         {   /* TFT edge cue: entry/exit visible on cockpit */
             static bool s_arc_was = false;
             if (arcade_eats && !s_arc_was)
@@ -3802,14 +3818,29 @@ void car_task(void *arg)
             s_arc_was = arcade_eats;
         }
         if (!arcade_eats) {
-            input_handle(pad, dig, tap, now);
+            if (bt_owns_pad) {
+                /* Phone owns the pad: keep the semantic event layer alive with
+                   BACK only, so os_update() can detect the 1.5 s exit hold.
+                   No car action (lights/horn/mode) may fire in this mode. */
+                input_events_update(dig, now);
+            } else {
+                input_handle(pad, dig, tap, now);
+            }
         }
         if (neon_raid_active()) neon_raid_tick(now);
         if (neon_breaker_active()) neon_breaker_tick(now);
         if (runner_active()) runner_tick(now);
         if (matrix_show_active()) matrix_show_tick(now);
 
-        if (arcade_eats) {
+        if (bt_owns_pad) {
+            /* XBOX CTRL is a phone-gaming mode: the car stays parked so a
+               stick deflection can never send a motor command. */
+            g.tgt_l = 0;
+            g.tgt_r = 0;
+            g.mist = false;
+            g.braking = false;
+            g.reversing = false;
+        } else if (arcade_eats) {
             /* arcade owns drive: force parked (motors/lights safe) */
             g.tgt_l = 0;
             g.tgt_r = 0;
@@ -3990,8 +4021,10 @@ void car_task(void *arg)
                 vTaskDelayUntil(&s_arc_wake, pdMS_TO_TICKS(20));
             } else {
                 s_arc_was = false;
-                /* games use a faster loop for smooth 30 FPS frame pacing */
-                vTaskDelay(pdMS_TO_TICKS(os_game_active() ? 20 : LOOP_MS));
+                /* games use a faster loop for smooth 30 FPS frame pacing;
+                   XBOX CTRL uses 20 ms too - BLE HID reports are only as fresh
+                   as this loop, so 40 ms (25 Hz) would feel laggy on the phone */
+                vTaskDelay(pdMS_TO_TICKS((os_game_active() || s_os.xbox_ctrl_conn) ? 20 : LOOP_MS));
             }
         }
     }

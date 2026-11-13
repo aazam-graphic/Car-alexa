@@ -723,13 +723,15 @@ void os_scr_home(const os_ctx_t *ctx, uint32_t now)
     uint32_t anim = now - s_chg_ms;
 
     /* LAG FIX Oct 2026: cards were marked dirty every frame (full 30 ms
-       push at 30 FPS). Redraw on selection anim + 2 Hz value refresh. */
+       push at 30 FPS). Redraw on selection anim + 2 Hz value refresh.
+       XBOX CTRL refreshes at 10 Hz so the live key readout feels real-time. */
     {
         static uint32_t s_last = 0;
         static uint8_t s_page = 0xFF;
         bool page_chg = (s_page != ctx->home_page);
         s_page = ctx->home_page;
-        if (anim >= 250 && !page_chg && (int32_t)(now - s_last) < 500) {
+        uint32_t refresh_ms = ctx->xbox_ctrl_conn ? 100 : 500;
+        if (anim >= 250 && !page_chg && (int32_t)(now - s_last) < (int32_t)refresh_ms) {
             ui_clear_dirty();
             return;
         }
@@ -763,7 +765,10 @@ void os_scr_home(const os_ctx_t *ctx, uint32_t now)
     gfx_rect(164, 27, 8, 8, ctx->home_page == 1 ? UI_DATA : UI_BORDER);
     mark_chrome(ctx);
 
-    ui_draw_bottombar("A OPEN  B DRIVE  RB PAGE", "HOME");
+    if (ctx->xbox_ctrl_conn)
+        ui_draw_bottombar("PHONE MODE - HOLD BACK 1.5s", "XBOX CTRL");
+    else
+        ui_draw_bottombar("A OPEN  B DRIVE  RB PAGE", "HOME");
 }
 
 

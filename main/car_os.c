@@ -506,6 +506,11 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
        (safety priority 1) - no other path may exit E-stop. */
     if (g.estop) return;
 
+    /* XBOX CTRL: the phone owns the pad while the bridge is on. Every key is
+       forwarded to the phone, so no press may navigate the car UI. The only
+       way out is a 1.5 s BACK hold, handled in os_update(). */
+    if (ctx->xbox_ctrl_conn) return;
+
     /* global: BACK+START = HOME shortcut.
        Armed latch (guide 2.8): triggers once per press, re-arms only after at
        least one button is released -> no auto-retrigger while held. */
@@ -691,6 +696,12 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
             car_sfx_click();
             snd_play(ctx->xbox_ctrl_conn ? "ui_toggle_on" : "ui_toggle_off");
             input_consume(B_BACK);
+            /* Show the XBOX CTRL card so the live key readout is visible */
+            if (ctx->xbox_ctrl_conn) {
+                ctx->home_page = 1;
+                ctx->home_sel  = 5;
+                go(ctx, OS_HOME, now);
+            }
         }
         /* A hold 700ms = mist toggle (idle gets its mist option) */
         if (ev_hold(B_A, IE_STD_HOLD_MS)) {
@@ -1310,6 +1321,17 @@ static void alert_watch(os_ctx_t *ctx, uint32_t now)
 void os_update(os_ctx_t *ctx, uint32_t now)
 {
     if (!s_ctx) s_ctx = ctx;
+
+    /* XBOX CTRL is a phone-gaming mode: BACK held 1.5 s hands the pad back.
+       Runs before the bridge enable so the flag flip takes effect this frame. */
+    if (ctx->xbox_ctrl_conn && ev_held(B_BACK, 1500)) {
+        ctx->xbox_ctrl_conn = 0;
+        input_consume_all();          /* no stale BACK tap/hold after release */
+        car_sfx_click();
+        snd_play("ui_toggle_off");
+        notif_push(NOTIF_SOUND, "XBOX CTRL OFF - car control back", now);
+        ESP_LOGI(TAG, "XBOX CTRL off (BACK hold) - pad back to car");
+    }
 
     /* Bluetooth gamepad bridge: mirror the enabled flag, push pad reports */
     xbox_bt_set_enabled(ctx->xbox_ctrl_conn != 0);
