@@ -779,6 +779,23 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
         if (tap & B_RB)     { ctx->home_page ^= 1; ctx->home_sel = 0; car_sfx_blip(1100); break; }
         if (tap & B_LB)     { ctx->home_page ^= 1; ctx->home_sel = 0; car_sfx_blip(1100); break; }
         if (ev_tap(B_BACK)) { go(ctx, OS_NOTIF, now); break; }   /* PART 10.3 */
+        /* XBOX CTRL card: Y held 1 s flips the BLE identity (XBOX <-> GENERIC).
+           Only when the bridge is off - while it is on the phone owns the pad. */
+        if (ctx->home_page && ctx->home_sel == 5 && !ctx->xbox_ctrl_conn &&
+            ev_hold(B_Y, 1000)) {
+            xbox_bt_profile_t next = (xbox_bt_profile() == XBOX_BT_PROFILE_XBOX)
+                                     ? XBOX_BT_PROFILE_GENERIC : XBOX_BT_PROFILE_XBOX;
+            xbox_bt_set_profile(next);
+            car_sfx_click();
+            snd_play("ui_toggle_on");
+            notif_push(NOTIF_SOUND,
+                       next == XBOX_BT_PROFILE_XBOX
+                           ? "XBOX 0B13 profile - re-pair phone"
+                           : "GENERIC profile - re-pair phone",
+                       now);
+            input_consume(B_Y);
+            break;
+        }
         if (tap & B_A) {
             /* P0 sel 1 = MATRIX SNAKE arcade launch (not an OS screen) */
             if (!ctx->home_page && ctx->home_sel == 1) {
@@ -803,8 +820,7 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
                 input_consume(B_A);
                 break;
             }
-            const os_state_t *map = ctx->home_page ? s_tile_state_p1 : s_tile_state_p0;
-            os_state_t tgt = map[ctx->home_sel];
+            const os_state_t *map = ctx->home_page ? s_tile_state_p1 : s_tile_state_p0;            os_state_t tgt = map[ctx->home_sel];
             /* PARK clock tile -> STANDBY */
             if (tgt == OS_STANDBY) {
                 car_sfx_click();

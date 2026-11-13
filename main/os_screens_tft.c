@@ -24,6 +24,7 @@
 #include "game_serpent.h" /* HOME MATRIX tile hiscore */
 #include "game_neon_breaker.h"
 #include "game_runner.h"
+#include "xbox_bt_bridge.h"   /* XBOX CTRL card: profile label */
 #include "runner_status.h"
 #include "matrix_show.h"
 #include "led_matrix.h"   /* hub MATRIX tile offline grey */
@@ -639,18 +640,19 @@ static const ui_icon_t s_home_icons_p1[9] = {
     UI_ICON_SCREEN, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK
 };
 
-/* Live Xbox button readout: returns e.g. "A+X" or "LB D-UP" for the pressed set */
+/* Live Xbox button readout: returns e.g. "A+X" or "LB+UP+RT" for the pressed set */
 static void xbox_btn_label(char *out, size_t n)
 {
     const xbox360_pad_t *p = xbox360_pad(0);
     if (!p || !p->present) { snprintf(out, n, "NO PAD"); return; }
     uint16_t d = (uint16_t)(p->buttons >> 16);
-    if (!d) { snprintf(out, n, "READY"); return; }
+    bool lt = p->lt > 100, rt = p->rt > 100;
+    if (!d && !lt && !rt) { snprintf(out, n, "READY"); return; }
     size_t used = 0; out[0] = 0;
     struct { uint16_t bit; const char *s; } m[] = {
         {B_A, "A"}, {B_B, "B"}, {B_X, "X"}, {B_Y, "Y"},
         {B_LB, "LB"}, {B_RB, "RB"}, {B_DUP, "UP"}, {B_DDOWN, "DN"},
-        {B_DLEFT, "LT"}, {B_DRIGHT, "RT"}, {B_START, "ST"}, {B_BACK, "BK"},
+        {B_DLEFT, "DL"}, {B_DRIGHT, "DR"}, {B_START, "ST"}, {B_BACK, "BK"},
         {B_LS, "LS"}, {B_RS, "RS"}
     };
     for (size_t i = 0; i < sizeof(m)/sizeof(m[0]) && used + 4 < n; i++) {
@@ -658,6 +660,14 @@ static void xbox_btn_label(char *out, size_t n)
             int w = snprintf(out + used, n - used, "%s%s", used ? "+" : "", m[i].s);
             if (w > 0) used += (size_t)w;
         }
+    }
+    if (lt && used + 4 < n) {
+        int w = snprintf(out + used, n - used, "%sLT", used ? "+" : "");
+        if (w > 0) used += (size_t)w;
+    }
+    if (rt && used + 4 < n) {
+        int w = snprintf(out + used, n - used, "%sRT", used ? "+" : "");
+        if (w > 0) used += (size_t)w;
     }
     if (!used) snprintf(out, n, "READY");
 }
@@ -699,7 +709,7 @@ static void home_card_value(const os_ctx_t *ctx, int slot, uint8_t page, char *o
         case 3: snprintf(out, n, "IDLE"); break;
         case 4: snprintf(out, n, "20 FX"); break;
         case 5: {
-            if (!ctx->xbox_ctrl_conn) { snprintf(out, n, "OFF"); break; }
+            if (!ctx->xbox_ctrl_conn) { snprintf(out, n, "%s", xbox_bt_profile_name()); break; }
             char kb[20]; xbox_btn_label(kb, sizeof(kb));
             snprintf(out, n, "%s", kb);
             break;
@@ -767,6 +777,8 @@ void os_scr_home(const os_ctx_t *ctx, uint32_t now)
 
     if (ctx->xbox_ctrl_conn)
         ui_draw_bottombar("PHONE MODE - HOLD BACK 1.5s", "XBOX CTRL");
+    else if (ctx->home_page && ctx->home_sel == 5)
+        ui_draw_bottombar("A ON  Y-HOLD PROFILE", xbox_bt_profile_name());
     else
         ui_draw_bottombar("A OPEN  B DRIVE  RB PAGE", "HOME");
 }

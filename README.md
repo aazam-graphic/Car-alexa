@@ -74,6 +74,41 @@ NEON SERPENT V2 screen: live mirror, score/hi, level/name, food progress, lives,
 - On SNTP lock: time synced, ding, then WiFi stops after sync; otherwise off after timeout.
 - Periodic epoch save while online.
 
+## XBOX CTRL (pad -> phone BLE HID)
+HOME page 2, XBOX CTRL card. Republishes the USB Xbox pad as a BLE HID gamepad
+so a phone can play with the same physical controller.
+
+- **A** = toggle. While on, the phone owns the pad: the car keeps only BACK, and
+  **BACK held 1.5 s** hands control back to the car.
+- **Y held 1 s** (bridge off) = switch identity; saved in NVS (`xboxbt/prof`).
+- Identities:
+  - `XBOX 0B13` (default) impersonates an Xbox Series X|S wireless controller:
+    PnP ID `02 5E 04 13 0B 13 05` (Microsoft `045E:0B13`), the 283-byte report
+    descriptor dumped from a real unit (`main/xbox_bt_descriptor.h`), report
+    ID 1, X/Y/Z/Rz 16-bit 0..65534, LT/RT 10-bit, 4-bit hat, 15 buttons + Share.
+    Button bits match a real pad: A=1, B=2, X=4, Y=5, LB=7, RB=8, BACK=11,
+    START=12, GUIDE=13, LS=14, RS=15.
+  - `GENERIC` = plain 8-byte BLE gamepad, kept as a fallback.
+- Advertising name: "Xbox Wireless Controller" (scan response), HID service
+  `0x1812`, appearance `0x03C8`.
+
+### Test list (Call of Duty Mobile)
+1. Android Bluetooth settings shows "Xbox Wireless Controller".
+2. COD -> Settings -> Controller shows a controller connected.
+3. Both sticks, LT/RT, D-pad, A/B/X/Y, LB/RB all work.
+4. Car display live key readout matches the pad.
+5. BACK held 1.5 s returns control to the car.
+6. If COD does not detect it, switch to `GENERIC` and pair again.
+
+### Known limitations
+- COD Mobile only accepts controllers in supported modes; officially only Xbox
+  One/Series X|S, DualShock 4 (not gen 1), DualSense and Backbone One are
+  listed. Third-party/emulated pads "vary".
+- On Android, COD accepts Bluetooth controllers only - no wired or dongle.
+- Controller players are put in a separate matchmaking pool from touch players.
+- Changing identity drops the link; the phone must "forget" the old bond and
+  pair again, because the device name is cached per bond.
+
 ## Important files
 - `main/car.c` — control loop, safety, boot/self-test orchestration, pin definitions.
 - `main/car_os.c/h` — Car OS context, states, screen dispatch.
@@ -82,6 +117,8 @@ NEON SERPENT V2 screen: live mirror, score/hi, level/name, food progress, lives,
 - `main/matrix_layout_23x13_299.h` — custom 23x13 LED map.
 - `main/matrix_fx.c` / `matrix_fx.h` — particle engine for matrix shows (fireworks); shared `hsv_rgb()` / `hsv_put()` colour helpers.
 - `main/game_serpent.c/h` — active arcade snake.
+- `main/xbox_bt_bridge.c/h` — pad -> phone BLE HID gamepad (XBOX/GENERIC identities).
+- `main/xbox_bt_descriptor.h` — 283-byte Xbox Series X|S HID report descriptor.
 - `main/serpent_levels.h` — 20 level layouts.
 - `main/net_wifi.c/h` — WiFi/SNTP/last-known epoch.
 - `main/imu_adv.c/h`, `imu_driver.c/h` — disabled if MPU absent.
