@@ -23,6 +23,7 @@
 #include "notif.h"
 #include "os_gfx.h"   /* PART 10: thumbnail capture */
 #include "os_theme.h" /* PART 12: radar-full clear color */
+#include "xbox_bt_bridge.h" /* BLE HID gamepad bridge */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -235,9 +236,10 @@ static const os_state_t s_tile_state_p0[9] = {
     OS_GAMES_HUB,  OS_DIAG,       OS_DRIVE_MAIN,   /* Games Diag Radar */
     OS_DRIVE_MAIN, OS_TRIP,       OS_NOTIF,        /* Roof Trip Notify */
 };
-static const os_state_t s_tile_state_p1[5] = {
+static const os_state_t s_tile_state_p1[6] = {
     OS_DRIVE_ANALYTICS, OS_SCORE,
     OS_CONN,            OS_STANDBY, OS_MATRIX_SHOW, /* clock, then 299 LED show */
+    OS_STANDBY,                                  /* XBOX CTRL: toggle only, never navigates */
 };
 
 static const char *s_names[] = {
@@ -308,8 +310,7 @@ bool os_game_active(void)
 void os_init(os_ctx_t *ctx)
 {
     memset(ctx, 0, sizeof(*ctx));
-    ctx->state = OS_BOOT;
-    ctx->prev_state = OS_BOOT;
+    ctx->state = OS_BOOT;    ctx->prev_state = OS_BOOT;
     ctx->state_enter_ms = os_now();
     ctx->home_sel = 0;
     ctx->game_sel = 0;
@@ -318,6 +319,9 @@ void os_init(os_ctx_t *ctx)
     ctx->drive_sub_view = 0;    /* VIEW 1 COCKPIT default (1.md 3.4) */
     ctx->cockpit_theme = 1;     /* SOLAR LIGHT default outdoor (1.md 3.5) */
     ctx->sb_design = 0;          /* standby clock design: TABLE (default) */
+    ctx->xbox_ctrl_conn = 0;     /* Bluetooth Xbox controller off by default */
+    ctx->xbox_ctrl_dongle = 0;
+    xbox_bt_init();              /* bring up BLE HID gamepad (idle until enabled) */
 
     /* Analytics history (guide 2.5): ONE PSRAM block split into 3 ring buffers.
        If PSRAM is unavailable, retry with a reduced 64-sample block in internal
@@ -680,6 +684,14 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
             snd_play(g.headlight ? "ui_toggle_on" : "ui_toggle_off");
             input_consume(B_A);
         }
+
+        /* B_BACK = toggle Xbox Bluetooth controller for mobile gaming */
+        if (ev_tap(B_BACK)) {
+            ctx->xbox_ctrl_conn = !ctx->xbox_ctrl_conn;
+            car_sfx_click();
+            snd_play(ctx->xbox_ctrl_conn ? "ui_toggle_on" : "ui_toggle_off");
+            input_consume(B_BACK);
+        }
         /* A hold 700ms = mist toggle (idle gets its mist option) */
         if (ev_hold(B_A, IE_STD_HOLD_MS)) {
             g.mist = !g.mist;
@@ -746,7 +758,7 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
     }
 
     case OS_HOME: {                    /* PART 10: widget cards, p0=9 p1=4 */
-        uint8_t ntiles = ctx->home_page ? 5 : 9;
+        uint8_t ntiles = ctx->home_page ? 6 : 9;
         uint8_t row = ctx->home_sel / 3, col = ctx->home_sel % 3;
         if (tap & B_DUP)    { row = (row + 2) % 3; ctx->home_sel = row * 3 + col; car_sfx_blip(900); snd_play("ui_nav"); }
         if (tap & B_DDOWN)  { row = (row + 1) % 3; ctx->home_sel = row * 3 + col; car_sfx_blip(900); snd_play("ui_nav"); }
@@ -770,6 +782,14 @@ void os_handle_input(os_ctx_t *ctx, const xbox360_pad_t *pad, uint16_t dig, uint
                 } else {
                     car_sfx_blip(300);
                 }
+                break;
+            }
+            /* XBOX CTRL card: toggle the Bluetooth gamepad bridge, stay on HOME */
+            if (ctx->home_page && ctx->home_sel == 5) {
+                ctx->xbox_ctrl_conn = !ctx->xbox_ctrl_conn;
+                car_sfx_click();
+                snd_play(ctx->xbox_ctrl_conn ? "ui_toggle_on" : "ui_toggle_off");
+                input_consume(B_A);
                 break;
             }
             const os_state_t *map = ctx->home_page ? s_tile_state_p1 : s_tile_state_p0;
@@ -1290,6 +1310,10 @@ static void alert_watch(os_ctx_t *ctx, uint32_t now)
 void os_update(os_ctx_t *ctx, uint32_t now)
 {
     if (!s_ctx) s_ctx = ctx;
+
+    /* Bluetooth gamepad bridge: mirror the enabled flag, push pad reports */
+    xbox_bt_set_enabled(ctx->xbox_ctrl_conn != 0);
+    xbox_bt_poll();
 
     /* boot splash -> STANDBY clock (car rests locked until START->menu) */
     if (ctx->state == OS_BOOT && now - ctx->state_enter_ms > 1500) {

@@ -626,7 +626,7 @@ static const char *s_home_labels_p0[9] = {
     "DRIVE", "SNAKE", "SETTINGS", "GAMES", "DIAG", "RADAR", "ROOF", "TRIP", "NOTIFY"
 };
 static const char *s_home_labels_p1[9] = {
-    "GRAPHS", "SCORE", "LINK", "CLOCK", "MATRIX", "", "", "", ""
+    "GRAPHS", "SCORE", "LINK", "CLOCK", "MATRIX", "XBOX CTRL", "", "", ""
 };
 static const ui_icon_t s_home_icons_p0[9] = {
     UI_ICON_DRIVE, UI_ICON_SCREEN, UI_ICON_GEAR,
@@ -639,7 +639,30 @@ static const ui_icon_t s_home_icons_p1[9] = {
     UI_ICON_SCREEN, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK, UI_ICON_BACK
 };
 
-static void home_card_value(int slot, uint8_t page, char *out, size_t n)
+/* Live Xbox button readout: returns e.g. "A+X" or "LB D-UP" for the pressed set */
+static void xbox_btn_label(char *out, size_t n)
+{
+    const xbox360_pad_t *p = xbox360_pad(0);
+    if (!p || !p->present) { snprintf(out, n, "NO PAD"); return; }
+    uint16_t d = (uint16_t)(p->buttons >> 16);
+    if (!d) { snprintf(out, n, "READY"); return; }
+    size_t used = 0; out[0] = 0;
+    struct { uint16_t bit; const char *s; } m[] = {
+        {B_A, "A"}, {B_B, "B"}, {B_X, "X"}, {B_Y, "Y"},
+        {B_LB, "LB"}, {B_RB, "RB"}, {B_DUP, "UP"}, {B_DDOWN, "DN"},
+        {B_DLEFT, "LT"}, {B_DRIGHT, "RT"}, {B_START, "ST"}, {B_BACK, "BK"},
+        {B_LS, "LS"}, {B_RS, "RS"}
+    };
+    for (size_t i = 0; i < sizeof(m)/sizeof(m[0]) && used + 4 < n; i++) {
+        if (d & m[i].bit) {
+            int w = snprintf(out + used, n - used, "%s%s", used ? "+" : "", m[i].s);
+            if (w > 0) used += (size_t)w;
+        }
+    }
+    if (!used) snprintf(out, n, "READY");
+}
+
+static void home_card_value(const os_ctx_t *ctx, int slot, uint8_t page, char *out, size_t n)
 {
     if (!page) {
         switch (slot) {
@@ -675,6 +698,12 @@ static void home_card_value(int slot, uint8_t page, char *out, size_t n)
         case 2: snprintf(out, n, "%s", net_wifi_up() ? "WIFI" : "OFF"); break;
         case 3: snprintf(out, n, "IDLE"); break;
         case 4: snprintf(out, n, "20 FX"); break;
+        case 5: {
+            if (!ctx->xbox_ctrl_conn) { snprintf(out, n, "OFF"); break; }
+            char kb[20]; xbox_btn_label(kb, sizeof(kb));
+            snprintf(out, n, "%s", kb);
+            break;
+        }
         default: snprintf(out, n, "OPEN"); break;
         }
     }
@@ -709,7 +738,7 @@ void os_scr_home(const os_ctx_t *ctx, uint32_t now)
 
     const char *const *labels = ctx->home_page ? s_home_labels_p1 : s_home_labels_p0;
     const ui_icon_t *icons = ctx->home_page ? s_home_icons_p1 : s_home_icons_p0;
-    const int ntiles = ctx->home_page ? 5 : 9;   /* page two adds the 299 LED MATRIX tile */
+    const int ntiles = ctx->home_page ? 6 : 9;   /* page two adds the 299 LED MATRIX + XBOX CTRL tiles */
     for (int i = 0; i < ntiles; i++) {
         int col = i % 3, row = i / 3;
         int x = 8 + col * 103, y = 34 + row * 64, w = 98, h = 52;
@@ -722,7 +751,7 @@ void os_scr_home(const os_ctx_t *ctx, uint32_t now)
         gfx_text_small(x + 25, y + 8, labels[i], sel ? UI_TEXT : UI_TEXT_2);
         {
             char vb[20];
-            home_card_value(i, ctx->home_page, vb, sizeof(vb));
+            home_card_value(ctx, i, ctx->home_page, vb, sizeof(vb));
             gfx_text_small(x + 25, y + 26, vb, UI_DATA);
         }
         ui_mark_dirty(x, y, w, h);

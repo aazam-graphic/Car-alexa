@@ -147,6 +147,8 @@ typedef struct {
     uint8_t drive_sub_view;         /* cockpit VIEW 0..3 (1.md 3.4, BACK tap cycles) */
     uint8_t cockpit_theme;          /* 0 NIGHT 1 SOLAR (default) 2 SUNLIGHT (BACK hold cycles) */
     uint8_t sb_design;              /* standby clock design 0..6 (RB/LB change) */
+    uint8_t xbox_ctrl_conn;         /* 0=off, 1=on (Bluetooth Xbox controller for mobile gaming) */
+    uint8_t xbox_ctrl_dongle;       /* dongle slot ID (0-3) */
     uint8_t radar_view;             /* 0=visual radar 1=details page          */
     uint32_t radar_cal_ms;          /* monotonic ms of last A (CAL) action     */
     uint8_t gear_flash;             /* gear change flash counter (guide §10) */
